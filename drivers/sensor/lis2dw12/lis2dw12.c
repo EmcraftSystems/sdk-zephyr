@@ -348,7 +348,7 @@ static const struct sensor_driver_api lis2dw12_driver_api = {
 	.channel_get = lis2dw12_channel_get,
 };
 
-static int lis2dw12_set_power_mode(const struct device *dev,
+int lis2dw12_set_power_mode(const struct device *dev,
 				    lis2dw12_mode_t pm)
 {
 	const struct lis2dw12_device_config *cfg = dev->config;
