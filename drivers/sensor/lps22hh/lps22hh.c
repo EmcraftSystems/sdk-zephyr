@@ -122,6 +122,24 @@ static int lps22hh_odr_set(const struct device *dev, uint16_t freq)
 	return 0;
 }
 
+static int lps22hh_mode_set(const struct device *dev, uint8_t mode)
+{
+	const struct lps22hh_config * const cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+
+	lps22hh_odr_t odr;
+
+	lps22hh_data_rate_get(ctx, &odr);
+
+	if (mode == LPS22HH_MODE_LOW_NOISE) {
+		odr |= 0x10;
+	} else {
+		odr &= ~0x10;
+	}
+
+	return lps22hh_data_rate_set(ctx, odr);
+}
+
 static int lps22hh_attr_set(const struct device *dev,
 			    enum sensor_channel chan,
 			    enum sensor_attribute attr,
@@ -135,6 +153,10 @@ static int lps22hh_attr_set(const struct device *dev,
 	switch (attr) {
 	case SENSOR_ATTR_SAMPLING_FREQUENCY:
 		return lps22hh_odr_set(dev, val->val1);
+
+	case SENSOR_ATTR_CONFIGURATION:
+		return lps22hh_mode_set(dev, val->val1);
+	
 	default:
 		LOG_DBG("operation not supported.");
 		return -ENOTSUP;
