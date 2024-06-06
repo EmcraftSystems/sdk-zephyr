@@ -27,6 +27,9 @@
 #include <zephyr/drivers/i3c.h>
 #endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(i3c) */
 
+#define LPS22HH_MODE_LOW_CURRENT 	0
+#define LPS22HH_MODE_LOW_NOISE		1
+
 struct lps22hh_config {
 	stmdev_ctx_t ctx;
 	union {
