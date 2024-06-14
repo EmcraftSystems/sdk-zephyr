@@ -83,7 +83,8 @@ struct lis2dw12_device_config {
 	bool hp_ref_mode;
 	bool drdy_pulsed;
 #ifdef CONFIG_LIS2DW12_TRIGGER
-	struct gpio_dt_spec gpio_int;
+	struct gpio_dt_spec gpio_int1;
+	struct gpio_dt_spec gpio_int2;
 	uint8_t int_pin;
 #ifdef CONFIG_LIS2DW12_TAP
 	uint8_t tap_mode;
@@ -139,10 +140,14 @@ struct lis2dw12_data {
 };
 
 #ifdef CONFIG_LIS2DW12_TRIGGER
+extern int pin_num;
 int lis2dw12_init_interrupt(const struct device *dev);
 int lis2dw12_trigger_set(const struct device *dev,
 			  const struct sensor_trigger *trig,
 			  sensor_trigger_handler_t handler);
 #endif /* CONFIG_LIS2DW12_TRIGGER */
+
+#define CONFIGURE_PM_MODE 1
+#define CONFIGURE_INT_PIN 2
 
 #endif /* ZEPHYR_DRIVERS_SENSOR_LIS2DW12_LIS2DW12_H_ */
