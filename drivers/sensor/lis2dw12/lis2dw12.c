@@ -81,6 +81,28 @@ static int lis2dw12_set_odr(const struct device *dev, uint16_t odr)
 	return lis2dw12_data_rate_set(ctx, val);
 }
 
+static int lis2dw12_set_power_mode(const struct device *dev,
+				    lis2dw12_mode_t pm)
+{
+	const struct lis2dw12_device_config *cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+	uint8_t regval = LIS2DW12_CONT_LOW_PWR_12bit;
+
+	switch (pm) {
+	case LIS2DW12_CONT_LOW_PWR_2:
+	case LIS2DW12_CONT_LOW_PWR_3:
+	case LIS2DW12_CONT_LOW_PWR_4:
+	case LIS2DW12_HIGH_PERFORMANCE:
+		regval = pm;
+		break;
+	default:
+		LOG_DBG("Apply default Power Mode");
+		break;
+	}
+
+	return lis2dw12_write_reg(ctx, LIS2DW12_CTRL1, &regval, 1);
+}
+
 static inline void lis2dw12_convert(struct sensor_value *val, int raw_val,
 				    float gain)
 {
@@ -151,6 +173,20 @@ static int lis2dw12_config(const struct device *dev, enum sensor_channel chan,
 				LIS2DW12_FS_TO_REG(sensor_ms2_to_g(val)));
 	case SENSOR_ATTR_SAMPLING_FREQUENCY:
 		return lis2dw12_set_odr(dev, val->val1);
+
+	case SENSOR_ATTR_CONFIGURATION:
+		if (val->val1 == CONFIGURE_PM_MODE) {
+			lis2dw12_mode_t pm = val->val2;
+			return lis2dw12_set_power_mode(dev, pm);
+		}
+
+		if (val->val1 == CONFIGURE_INT_PIN) {
+			LOG_INF("Configure INT pin %d", val->val2);
+			pin_num = val->val2;
+			lis2dw12_init_interrupt(dev);
+			return 0;
+		}
+	
 	default:
 		LOG_DBG("Acc attribute not supported");
 		break;
@@ -348,28 +384,6 @@ static const struct sensor_driver_api lis2dw12_driver_api = {
 	.channel_get = lis2dw12_channel_get,
 };
 
-int lis2dw12_set_power_mode(const struct device *dev,
-				    lis2dw12_mode_t pm)
-{
-	const struct lis2dw12_device_config *cfg = dev->config;
-	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
-	uint8_t regval = LIS2DW12_CONT_LOW_PWR_12bit;
-
-	switch (pm) {
-	case LIS2DW12_CONT_LOW_PWR_2:
-	case LIS2DW12_CONT_LOW_PWR_3:
-	case LIS2DW12_CONT_LOW_PWR_4:
-	case LIS2DW12_HIGH_PERFORMANCE:
-		regval = pm;
-		break;
-	default:
-		LOG_DBG("Apply default Power Mode");
-		break;
-	}
-
-	return lis2dw12_write_reg(ctx, LIS2DW12_CTRL1, &regval, 1);
-}
-
 static int lis2dw12_set_low_noise(const struct device *dev,
 				  bool low_noise)
 {
@@ -538,7 +552,8 @@ static int lis2dw12_init(const struct device *dev)
 
 #ifdef CONFIG_LIS2DW12_TRIGGER
 #define LIS2DW12_CFG_IRQ(inst) \
-	.gpio_int = GPIO_DT_SPEC_INST_GET(inst, irq_gpios),		\
+	.gpio_int1 = GPIO_DT_SPEC_INST_GET_BY_IDX_OR(inst, irq_gpios, 0, {}),\
+	.gpio_int2 = GPIO_DT_SPEC_INST_GET_BY_IDX_OR(inst, irq_gpios, 1, {}),\
 	.int_pin = DT_INST_PROP(inst, int_pin),
 #else
 #define LIS2DW12_CFG_IRQ(inst)
