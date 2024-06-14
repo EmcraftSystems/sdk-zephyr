@@ -19,6 +19,11 @@
 
 LOG_MODULE_DECLARE(LIS2DW12, CONFIG_SENSOR_LOG_LEVEL);
 
+int pin_num = 1;
+
+#define GPIO_INT_P ((pin_num == 1) ? &cfg->gpio_int1 : &cfg->gpio_int2)
+#define GPIO_INT   ((pin_num == 1) ? cfg->gpio_int1 : cfg->gpio_int2)
+
 /**
  * lis2dw12_enable_int - enable selected int pin to generate interrupt
  */
@@ -31,7 +36,7 @@ static int lis2dw12_enable_int(const struct device *dev,
 
 	switch (type) {
 	case SENSOR_TRIG_DATA_READY:
-		if (cfg->int_pin == 1) {
+		if (pin_num == 1) {
 			/* set interrupt for pin INT1 */
 			lis2dw12_pin_int1_route_get(ctx,
 					&int_route.ctrl4_int1_pad_ctrl);
@@ -116,7 +121,7 @@ int lis2dw12_trigger_set(const struct device *dev,
 	int16_t raw[3];
 	int state = (handler != NULL) ? PROPERTY_ENABLE : PROPERTY_DISABLE;
 
-	if (cfg->gpio_int.port == NULL) {
+	if (GPIO_INT.port == NULL) {
 		LOG_ERR("trigger_set is not supported");
 		return -ENOTSUP;
 	}
@@ -276,7 +281,7 @@ static void lis2dw12_handle_interrupt(const struct device *dev)
 	}
 #endif /* CONFIG_LIS2DW12_FREEFALL */
 
-	gpio_pin_interrupt_configure_dt(&cfg->gpio_int,
+	gpio_pin_interrupt_configure_dt(GPIO_INT_P,
 					GPIO_INT_EDGE_TO_ACTIVE);
 }
 
@@ -287,11 +292,11 @@ static void lis2dw12_gpio_callback(const struct device *dev,
 		CONTAINER_OF(cb, struct lis2dw12_data, gpio_cb);
 	const struct lis2dw12_device_config *cfg = lis2dw12->dev->config;
 
-	if ((pins & BIT(cfg->gpio_int.pin)) == 0U) {
+	if ((pins & BIT(GPIO_INT.pin)) == 0U) {
 		return;
 	}
 
-	gpio_pin_interrupt_configure_dt(&cfg->gpio_int, GPIO_INT_DISABLE);
+	gpio_pin_interrupt_configure_dt(GPIO_INT_P, GPIO_INT_DISABLE);
 
 #if defined(CONFIG_LIS2DW12_TRIGGER_OWN_THREAD)
 	k_sem_give(&lis2dw12->gpio_sem);
@@ -437,10 +442,10 @@ int lis2dw12_init_interrupt(const struct device *dev)
 	int ret;
 
 	/* setup data ready gpio interrupt (INT1 or INT2) */
-	if (!gpio_is_ready_dt(&cfg->gpio_int)) {
-		if (cfg->gpio_int.port) {
+	if (!gpio_is_ready_dt(GPIO_INT_P)) {
+		if (GPIO_INT.port) {
 			LOG_ERR("%s: device %s is not ready", dev->name,
-						cfg->gpio_int.port->name);
+						GPIO_INT.port->name);
 			return -ENODEV;
 		}
 
@@ -450,7 +455,7 @@ int lis2dw12_init_interrupt(const struct device *dev)
 
 	lis2dw12->dev = dev;
 
-	LOG_INF("%s: int-pin is on INT%d", dev->name, cfg->int_pin);
+	LOG_INF("%s: int-pin is on INT%d", dev->name, pin_num);
 #if defined(CONFIG_LIS2DW12_TRIGGER_OWN_THREAD)
 	k_sem_init(&lis2dw12->gpio_sem, 0, K_SEM_MAX_LIMIT);
 
@@ -463,20 +468,20 @@ int lis2dw12_init_interrupt(const struct device *dev)
 	lis2dw12->work.handler = lis2dw12_work_cb;
 #endif /* CONFIG_LIS2DW12_TRIGGER_OWN_THREAD */
 
-	ret = gpio_pin_configure_dt(&cfg->gpio_int, GPIO_INPUT);
+	ret = gpio_pin_configure_dt(GPIO_INT_P, GPIO_INPUT);
 	if (ret < 0) {
 		LOG_ERR("Could not configure gpio");
 		return ret;
 	}
 
-	LOG_INF("%s: int on %s.%02u", dev->name, cfg->gpio_int.port->name,
-				      cfg->gpio_int.pin);
+	LOG_INF("%s: int on %s.%02u", dev->name, GPIO_INT.port->name,
+				      GPIO_INT.pin);
 
 	gpio_init_callback(&lis2dw12->gpio_cb,
 			   lis2dw12_gpio_callback,
-			   BIT(cfg->gpio_int.pin));
+			   BIT(GPIO_INT.pin));
 
-	if (gpio_add_callback(cfg->gpio_int.port, &lis2dw12->gpio_cb) < 0) {
+	if (gpio_add_callback(GPIO_INT.port, &lis2dw12->gpio_cb) < 0) {
 		LOG_DBG("Could not set gpio callback");
 		return -EIO;
 	}
@@ -506,6 +511,6 @@ int lis2dw12_init_interrupt(const struct device *dev)
 		}
 #endif /* CONFIG_LIS2DW12_FREEFALL */
 
-	return gpio_pin_interrupt_configure_dt(&cfg->gpio_int,
+	return gpio_pin_interrupt_configure_dt(GPIO_INT_P,
 					       GPIO_INT_EDGE_TO_ACTIVE);
 }
