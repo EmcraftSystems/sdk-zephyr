@@ -156,7 +156,7 @@ static int lps22hh_attr_set(const struct device *dev,
 
 	case SENSOR_ATTR_CONFIGURATION:
 		return lps22hh_mode_set(dev, val->val1);
-	
+
 	default:
 		LOG_DBG("operation not supported.");
 		return -ENOTSUP;

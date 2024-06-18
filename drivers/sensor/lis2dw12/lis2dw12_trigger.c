@@ -19,10 +19,10 @@
 
 LOG_MODULE_DECLARE(LIS2DW12, CONFIG_SENSOR_LOG_LEVEL);
 
-int pin_num = 1;
+int lis2dw12_pin_number = 1;
 
-#define GPIO_INT_P ((pin_num == 1) ? &cfg->gpio_int1 : &cfg->gpio_int2)
-#define GPIO_INT   ((pin_num == 1) ? cfg->gpio_int1 : cfg->gpio_int2)
+#define GPIO_INT_P ((lis2dw12_pin_number == 1) ? &cfg->gpio_int1 : &cfg->gpio_int2)
+#define GPIO_INT   ((lis2dw12_pin_number == 1) ?  cfg->gpio_int1 :  cfg->gpio_int2)
 
 /**
  * lis2dw12_enable_int - enable selected int pin to generate interrupt
@@ -36,7 +36,7 @@ static int lis2dw12_enable_int(const struct device *dev,
 
 	switch (type) {
 	case SENSOR_TRIG_DATA_READY:
-		if (pin_num == 1) {
+		if (lis2dw12_pin_number == 1) {
 			/* set interrupt for pin INT1 */
 			lis2dw12_pin_int1_route_get(ctx,
 					&int_route.ctrl4_int1_pad_ctrl);
@@ -455,7 +455,7 @@ int lis2dw12_init_interrupt(const struct device *dev)
 
 	lis2dw12->dev = dev;
 
-	LOG_INF("%s: int-pin is on INT%d", dev->name, pin_num);
+	LOG_INF("%s: int-pin is on INT%d", dev->name, lis2dw12_pin_number);
 #if defined(CONFIG_LIS2DW12_TRIGGER_OWN_THREAD)
 	k_sem_init(&lis2dw12->gpio_sem, 0, K_SEM_MAX_LIMIT);
 

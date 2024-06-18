@@ -4,6 +4,8 @@
  * Copyright (c) 2017 Linaro Limited
  *
  * SPDX-License-Identifier: Apache-2.0
+ * Datasheet:
+ * https://www.st.com/resource/en/datasheet/lps22hb.pdf
  */
 
 #define DT_DRV_COMPAT st_lps22hb_press
@@ -117,12 +119,11 @@ static int lps22hb_mode_set(const struct device *dev, uint8_t mode)
 {
 	const struct lps22hb_config * const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
-	uint8_t odr;
-
+	lps22hb_odr_t odr;
 
 	lps22hb_data_rate_get(ctx, &odr);
 
-	// Power down
+	/* Power down */
 	lps22hb_data_rate_set(ctx, 0);
 
 	if (mode == LPS22HB_MODE_LOW_CURRENT) {
@@ -234,9 +235,10 @@ static int lps22hb_init(const struct device *dev)
 #define LPS22HB_CFG_IRQ(inst)
 #endif /* CONFIG_LPS22HB_TRIGGER */
 
-#define LPS22HB_CONFIG_COMMON(inst)                                                          \
-	.odr = DT_INST_PROP(inst, odr), 														 \
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, drdy_gpios), (LPS22HB_CFG_IRQ(inst)), ())
+#define LPS22HB_CONFIG_COMMON(inst)					\
+	.odr = DT_INST_PROP(inst, odr),					\
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, drdy_gpios),		\
+			(LPS22HB_CFG_IRQ(inst)), ())
 
 /*
  * Instantiation macros used when a device is on a SPI bus.
