@@ -143,7 +143,7 @@ struct lis2dw12_data {
 };
 
 #ifdef CONFIG_LIS2DW12_TRIGGER
-extern int pin_num;
+extern int lis2dw12_pin_number;
 int lis2dw12_init_interrupt(const struct device *dev);
 int lis2dw12_trigger_set(const struct device *dev,
 			  const struct sensor_trigger *trig,

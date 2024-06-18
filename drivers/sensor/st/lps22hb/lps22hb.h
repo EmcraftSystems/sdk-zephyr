@@ -24,8 +24,8 @@
 #include <zephyr/drivers/i2c.h>
 #endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c) */
 
-#define LPS22HB_MODE_LOW_CURRENT 	0
-#define LPS22HB_MODE_LOW_NOISE		1
+#define LPS22HB_MODE_LOW_CURRENT 0
+#define LPS22HB_MODE_LOW_NOISE 1
 
 struct lps22hb_config {
 	stmdev_ctx_t ctx;

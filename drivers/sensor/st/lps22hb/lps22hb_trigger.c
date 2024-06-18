@@ -96,7 +96,7 @@ static void lps22hb_intr_callback(struct lps22hb_data *lps22hb)
 
 static void lps22hb_gpio_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-	struct lps22hb_data *lps22hb = 
+	struct lps22hb_data *lps22hb =
 		CONTAINER_OF(cb, struct lps22hb_data, gpio_cb);
 
 	ARG_UNUSED(pins);
@@ -171,7 +171,7 @@ int lps22hb_init_interrupt(const struct device *dev)
 		return ret;
 	}
 
-	LOG_INF("%s: int on %s.%02u", dev->name, cfg->gpio_int.port->name, cfg->gpio_int.pin);
+	LOG_DBG("%s: int on %s.%02u", dev->name, cfg->gpio_int.port->name, cfg->gpio_int.pin);
 
 	gpio_init_callback(&lps22hb->gpio_cb, lps22hb_gpio_callback, BIT(cfg->gpio_int.pin));
 
@@ -190,12 +190,12 @@ int lps22hb_init_interrupt(const struct device *dev)
 	rc += lps22hb_int_pin_mode_set(ctx, LPS22HB_DRDY_OR_FIFO_FLAGS);
 	rc += lps22hb_pin_mode_set(ctx, LPS22HB_OPEN_DRAIN);
 	rc += lps22hb_int_polarity_set(ctx, LPS22HB_ACTIVE_HIGH);
-	
+
 	if (rc != 0) {
 		LOG_ERR("Failed to configure interrupt");
 		return -EIO;
 	}
 
-	return gpio_pin_interrupt_configure_dt(&cfg->gpio_int, 
+	return gpio_pin_interrupt_configure_dt(&cfg->gpio_int,
 			GPIO_INT_EDGE_TO_ACTIVE);
 }
