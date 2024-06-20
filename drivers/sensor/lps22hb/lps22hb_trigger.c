@@ -188,7 +188,6 @@ int lps22hb_init_interrupt(const struct device *dev)
 	rc += lps22hb_fifo_mode_set(ctx, LPS22HB_BYPASS_MODE);
 	rc += lps22hb_drdy_on_int_set(ctx, 1);
 	rc += lps22hb_int_pin_mode_set(ctx, LPS22HB_DRDY_OR_FIFO_FLAGS);
-	rc += lps22hb_pin_mode_set(ctx, LPS22HB_OPEN_DRAIN);
 	rc += lps22hb_int_polarity_set(ctx, LPS22HB_ACTIVE_HIGH);
 
 	if (rc != 0) {
