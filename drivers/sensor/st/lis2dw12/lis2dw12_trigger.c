@@ -455,7 +455,7 @@ int lis2dw12_init_interrupt(const struct device *dev)
 
 	lis2dw12->dev = dev;
 
-	LOG_INF("%s: int-pin is on INT%d", dev->name, lis2dw12_pin_number);
+	LOG_DBG("%s: int-pin is on INT%d", dev->name, lis2dw12_pin_number);
 #if defined(CONFIG_LIS2DW12_TRIGGER_OWN_THREAD)
 	k_sem_init(&lis2dw12->gpio_sem, 0, K_SEM_MAX_LIMIT);
 
@@ -474,7 +474,7 @@ int lis2dw12_init_interrupt(const struct device *dev)
 		return ret;
 	}
 
-	LOG_INF("%s: int on %s.%02u", dev->name, GPIO_INT.port->name,
+	LOG_DBG("%s: int on %s.%02u", dev->name, GPIO_INT.port->name,
 				      GPIO_INT.pin);
 
 	gpio_init_callback(&lis2dw12->gpio_cb,
