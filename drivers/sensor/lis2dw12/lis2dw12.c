@@ -182,7 +182,7 @@ static int lis2dw12_config(const struct device *dev, enum sensor_channel chan,
 
 		if (val->val1 == CONFIGURE_INT_PIN) {
 #ifdef CONFIG_LIS2DW12_TRIGGER
-			LOG_INF("Configure INT pin %d", val->val2);
+			LOG_DBG("Configure INT pin %d", val->val2);
 			lis2dw12_pin_number = val->val2;
 			lis2dw12_init_interrupt(dev);
 #endif /* CONFIG_LIS2DW12_TRIGGER */
