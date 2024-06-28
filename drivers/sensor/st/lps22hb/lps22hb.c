@@ -117,7 +117,7 @@ static int lps22hb_odr_set(const struct device *dev, uint16_t freq)
 
 static int lps22hb_mode_set(const struct device *dev, uint8_t mode)
 {
-	const struct lps22hb_config * const cfg = dev->config;
+	const struct lps22hb_config *const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	lps22hb_odr_t odr;
 
@@ -137,6 +137,18 @@ static int lps22hb_mode_set(const struct device *dev, uint8_t mode)
 	return 0;
 }
 
+static int lps22hb_threshold_set(const struct device *dev, uint16_t threshold)
+{
+	const struct lps22hb_config *const cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+
+	lps22hb_autozero_set(ctx, 1);
+	lps22hb_int_generation_set(ctx, 1);
+	lps22hb_sign_of_int_threshold_set(ctx, LPS22HB_POSITIVE);
+	lps22hb_int_threshold_set(ctx, threshold);
+
+	return 0;
+}
 
 static int lps22hb_attr_set(const struct device *dev, enum sensor_channel chan,
 			    enum sensor_attribute attr, const struct sensor_value *val)
@@ -151,7 +163,15 @@ static int lps22hb_attr_set(const struct device *dev, enum sensor_channel chan,
 		return lps22hb_odr_set(dev, val->val1);
 
 	case SENSOR_ATTR_CONFIGURATION:
-		return lps22hb_mode_set(dev, val->val1);
+		switch (val->val1) {
+		case LPS22HB_CMD_SET_MODE:
+			return lps22hb_mode_set(dev, val->val2);
+		case LPS22HB_CMD_SET_THRESHOLD:
+			return lps22hb_threshold_set(dev, val->val2);
+		default:
+			LOG_ERR("command not supported.");
+			return -ENOTSUP;
+		}
 
 	default:
 		LOG_ERR("operation not supported.");
@@ -235,10 +255,9 @@ static int lps22hb_init(const struct device *dev)
 #define LPS22HB_CFG_IRQ(inst)
 #endif /* CONFIG_LPS22HB_TRIGGER */
 
-#define LPS22HB_CONFIG_COMMON(inst)					\
-	.odr = DT_INST_PROP(inst, odr),					\
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, drdy_gpios),		\
-			(LPS22HB_CFG_IRQ(inst)), ())
+#define LPS22HB_CONFIG_COMMON(inst)                                                                \
+	.odr = DT_INST_PROP(inst, odr),                                                            \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, drdy_gpios), (LPS22HB_CFG_IRQ(inst)), ())
 
 /*
  * Instantiation macros used when a device is on a SPI bus.
@@ -247,29 +266,24 @@ static int lps22hb_init(const struct device *dev)
 #define LPS22HB_SPI_OPERATION (SPI_WORD_SET(8) | SPI_OP_MODE_MASTER | SPI_MODE_CPOL | SPI_MODE_CPHA)
 
 #define LPS22HB_CONFIG_SPI(inst)                                                                   \
-	{                                                                                          \
-		STMEMSC_CTX_SPI(&lps22hb_config_##inst.stmemsc_cfg),                               \
-			.stmemsc_cfg =                                                             \
-				{                                                                  \
-					.spi = SPI_DT_SPEC_INST_GET(inst, LPS22HB_SPI_OPERATION,   \
-								    0),                            \
-				},                                                                 \
-			LPS22HB_CONFIG_COMMON(inst)                                                \
-	}
+	{STMEMSC_CTX_SPI(&lps22hb_config_##inst.stmemsc_cfg),                                      \
+	 .stmemsc_cfg =                                                                            \
+		 {                                                                                 \
+			 .spi = SPI_DT_SPEC_INST_GET(inst, LPS22HB_SPI_OPERATION, 0),              \
+		 },                                                                                \
+	 LPS22HB_CONFIG_COMMON(inst)}
 
 /*
  * Instantiation macros used when a device is on an I2C bus.
  */
 
 #define LPS22HB_CONFIG_I2C(inst)                                                                   \
-	{                                                                                          \
-		STMEMSC_CTX_I2C(&lps22hb_config_##inst.stmemsc_cfg),                               \
-			.stmemsc_cfg =                                                             \
-				{                                                                  \
-					.i2c = I2C_DT_SPEC_INST_GET(inst),                         \
-				},                                                                 \
-			LPS22HB_CONFIG_COMMON(inst)                                                \
-	}
+	{STMEMSC_CTX_I2C(&lps22hb_config_##inst.stmemsc_cfg),                                      \
+	 .stmemsc_cfg =                                                                            \
+		 {                                                                                 \
+			 .i2c = I2C_DT_SPEC_INST_GET(inst),                                        \
+		 },                                                                                \
+	 LPS22HB_CONFIG_COMMON(inst)}
 
 /*
  * Main instantiation macro. Use of COND_CODE_1() selects the right
