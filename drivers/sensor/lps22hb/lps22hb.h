@@ -24,8 +24,11 @@
 #include <zephyr/drivers/i2c.h>
 #endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c) */
 
+#define LPS22HB_CMD_SET_MODE      0
+#define LPS22HB_CMD_SET_THRESHOLD 1
+
 #define LPS22HB_MODE_LOW_CURRENT 0
-#define LPS22HB_MODE_LOW_NOISE 1
+#define LPS22HB_MODE_LOW_NOISE   1
 
 struct lps22hb_config {
 	stmdev_ctx_t ctx;
@@ -67,8 +70,7 @@ struct lps22hb_data {
 };
 
 #ifdef CONFIG_LPS22HB_TRIGGER
-int lps22hb_trigger_set(const struct device *dev,
-			const struct sensor_trigger *trig,
+int lps22hb_trigger_set(const struct device *dev, const struct sensor_trigger *trig,
 			sensor_trigger_handler_t handler);
 
 int lps22hb_init_interrupt(const struct device *dev);
