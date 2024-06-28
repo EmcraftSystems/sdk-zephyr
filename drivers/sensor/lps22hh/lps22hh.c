@@ -124,7 +124,7 @@ static int lps22hh_odr_set(const struct device *dev, uint16_t freq)
 
 static int lps22hh_mode_set(const struct device *dev, uint8_t mode)
 {
-	const struct lps22hh_config * const cfg = dev->config;
+	const struct lps22hh_config *const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 
 	lps22hh_odr_t odr;
@@ -140,10 +140,27 @@ static int lps22hh_mode_set(const struct device *dev, uint8_t mode)
 	return lps22hh_data_rate_set(ctx, odr);
 }
 
-static int lps22hh_attr_set(const struct device *dev,
-			    enum sensor_channel chan,
-			    enum sensor_attribute attr,
-			    const struct sensor_value *val)
+static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
+{
+	const struct lps22hh_config *const cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+	lps22hh_pin_int_route_t int_route;
+
+	lps22hh_autozero_set(ctx, 1);
+
+	/* set interrupt */
+	lps22hh_pin_int_route_get(ctx, &int_route);
+	int_route.drdy_pres = 1;
+	lps22hh_pin_int_route_set(ctx, &int_route);
+
+	lps22hh_int_on_threshold_set(ctx, LPS22HH_POSITIVE);
+	lps22hh_int_treshold_set(ctx, threshold);
+
+	return 0;
+}
+
+static int lps22hh_attr_set(const struct device *dev, enum sensor_channel chan,
+			    enum sensor_attribute attr, const struct sensor_value *val)
 {
 	if (chan != SENSOR_CHAN_ALL) {
 		LOG_WRN("attr_set() not supported on this channel.");
@@ -155,7 +172,15 @@ static int lps22hh_attr_set(const struct device *dev,
 		return lps22hh_odr_set(dev, val->val1);
 
 	case SENSOR_ATTR_CONFIGURATION:
-		return lps22hh_mode_set(dev, val->val1);
+		switch (val->val1) {
+		case LPS22HH_CMD_SET_MODE:
+			return lps22hh_mode_set(dev, val->val2);
+		case LPS22HH_CMD_SET_THRESHOLD:
+			return lps22hh_threshold_set(dev, val->val2);
+		default:
+			LOG_ERR("command not supported.");
+			return -ENOTSUP;
+		}
 
 	default:
 		LOG_DBG("operation not supported.");
