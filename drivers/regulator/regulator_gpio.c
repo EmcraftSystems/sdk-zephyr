@@ -23,6 +23,8 @@ struct regulator_gpio_config {
 	uint8_t states_cnt;
 
 	const struct gpio_dt_spec enable;
+
+	uint8_t no_readback;
 };
 
 struct regulator_gpio_data {
@@ -44,7 +46,7 @@ static int regulator_gpio_apply_state(const struct device *dev, uint32_t state)
 			return ret;
 		}
 
-		if (ret != new_state_of_gpio) {
+		if (ret != new_state_of_gpio || cfg->no_readback) {
 			ret = gpio_pin_set_dt(&cfg->gpios[gpio_idx], new_state_of_gpio);
 			if (ret < 0) {
 				LOG_ERR("%s: can't set pin state", dev->name);
@@ -221,6 +223,7 @@ static int regulator_gpio_init(const struct device *dev)
 		.enable = GPIO_DT_SPEC_INST_GET_OR(inst, enable_gpios, {0}),                       \
 		.states = ((const int[])DT_INST_PROP(inst, states)),                               \
 		.states_cnt = DT_INST_PROP_LEN(inst, states) / 2,                                  \
+		.no_readback = DT_INST_NODE_HAS_PROP(inst, no_readback),			   \
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(inst, regulator_gpio_init, NULL, &data##inst, &config##inst,         \
 			      POST_KERNEL, CONFIG_REGULATOR_GPIO_INIT_PRIORITY,                    \
