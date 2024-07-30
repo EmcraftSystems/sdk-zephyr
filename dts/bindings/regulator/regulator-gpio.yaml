@@ -74,3 +74,8 @@ properties:
   startup-delay-us:
     type: int
     description: startup time in microseconds
+
+  no-readback:
+    type: boolean
+    description: |
+      GPIO does not support reading back output value.
