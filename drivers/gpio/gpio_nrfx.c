@@ -17,6 +17,7 @@ struct gpio_nrfx_data {
 	/* gpio_driver_data needs to be first */
 	struct gpio_driver_data common;
 	sys_slist_t callbacks;
+	uint32_t *counters;
 };
 
 struct gpio_nrfx_cfg {
@@ -25,6 +26,7 @@ struct gpio_nrfx_cfg {
 	NRF_GPIO_Type *port;
 	uint32_t edge_sense;
 	uint8_t port_num;
+	uint8_t ngpios;
 };
 
 static inline struct gpio_nrfx_data *get_port_data(const struct device *port)
@@ -361,7 +363,12 @@ static void nrfx_gpio_handler(nrfx_gpiote_pin_t abs_pin,
 	}
 
 	struct gpio_nrfx_data *data = get_port_data(port);
+	const struct gpio_nrfx_cfg *cfg = get_port_cfg(port);
 	sys_slist_t *list = &data->callbacks;
+
+	if (pin < cfg->ngpios) {
+		data->counters[pin]++;
+	}
 
 	gpio_fire_callbacks(list, port, BIT(pin));
 }
@@ -421,10 +428,15 @@ static const struct gpio_driver_api gpio_nrfx_drv_api_funcs = {
 		},							\
 		.port = _CONCAT(NRF_P, DT_INST_PROP(id, port)),		\
 		.port_num = DT_INST_PROP(id, port),			\
+		.ngpios = DT_INST_PROP_OR(id, ngpios, 32),		\
 		.edge_sense = DT_INST_PROP_OR(id, sense_edge_mask, 0)	\
 	};								\
 									\
-	static struct gpio_nrfx_data gpio_nrfx_p##id##_data;		\
+	static uint32_t gpio_nrfx_p##id##_irq_counters[DT_INST_PROP_OR( \
+			id, ngpios, 32)];				\
+	static struct gpio_nrfx_data gpio_nrfx_p##id##_data = {		\
+		.counters = gpio_nrfx_p##id##_irq_counters		\
+	};								\
 									\
 	DEVICE_DT_INST_DEFINE(id, gpio_nrfx_init,			\
 			 NULL,						\
