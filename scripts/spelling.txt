@@ -1102,7 +1102,6 @@ transision||transition
 transmittd||transmitted
 transormed||transformed
 trasmission||transmission
-treshold||threshold
 trigerring||triggering
 trun||turn
 ture||true
