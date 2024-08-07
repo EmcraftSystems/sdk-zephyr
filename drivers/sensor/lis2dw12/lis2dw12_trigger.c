@@ -19,10 +19,10 @@
 
 LOG_MODULE_DECLARE(LIS2DW12, CONFIG_SENSOR_LOG_LEVEL);
 
-int pin_num = 1;
+int lis2dw12_pin_number = 1;
 
-#define GPIO_INT_P ((pin_num == 1) ? &cfg->gpio_int1 : &cfg->gpio_int2)
-#define GPIO_INT   ((pin_num == 1) ? cfg->gpio_int1 : cfg->gpio_int2)
+#define GPIO_INT_P ((lis2dw12_pin_number == 1) ? &cfg->gpio_int1 : &cfg->gpio_int2)
+#define GPIO_INT   ((lis2dw12_pin_number == 1) ?  cfg->gpio_int1 :  cfg->gpio_int2)
 
 /**
  * lis2dw12_enable_int - enable selected int pin to generate interrupt
@@ -36,7 +36,7 @@ static int lis2dw12_enable_int(const struct device *dev,
 
 	switch (type) {
 	case SENSOR_TRIG_DATA_READY:
-		if (pin_num == 1) {
+		if (lis2dw12_pin_number == 1) {
 			/* set interrupt for pin INT1 */
 			lis2dw12_pin_int1_route_get(ctx,
 					&int_route.ctrl4_int1_pad_ctrl);
@@ -306,8 +306,13 @@ static void lis2dw12_gpio_callback(const struct device *dev,
 }
 
 #ifdef CONFIG_LIS2DW12_TRIGGER_OWN_THREAD
-static void lis2dw12_thread(struct lis2dw12_data *lis2dw12)
+static void lis2dw12_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct lis2dw12_data *lis2dw12 = p1;
+
 	while (1) {
 		k_sem_take(&lis2dw12->gpio_sem, K_FOREVER);
 		lis2dw12_handle_interrupt(lis2dw12->dev);
@@ -450,13 +455,13 @@ int lis2dw12_init_interrupt(const struct device *dev)
 
 	lis2dw12->dev = dev;
 
-	LOG_INF("%s: int-pin is on INT%d", dev->name, pin_num);
+	LOG_DBG("%s: int-pin is on INT%d", dev->name, lis2dw12_pin_number);
 #if defined(CONFIG_LIS2DW12_TRIGGER_OWN_THREAD)
 	k_sem_init(&lis2dw12->gpio_sem, 0, K_SEM_MAX_LIMIT);
 
 	k_thread_create(&lis2dw12->thread, lis2dw12->thread_stack,
 		       CONFIG_LIS2DW12_THREAD_STACK_SIZE,
-		       (k_thread_entry_t)lis2dw12_thread, lis2dw12,
+		       lis2dw12_thread, lis2dw12,
 		       NULL, NULL, K_PRIO_COOP(CONFIG_LIS2DW12_THREAD_PRIORITY),
 		       0, K_NO_WAIT);
 #elif defined(CONFIG_LIS2DW12_TRIGGER_GLOBAL_THREAD)
@@ -469,7 +474,7 @@ int lis2dw12_init_interrupt(const struct device *dev)
 		return ret;
 	}
 
-	LOG_INF("%s: int on %s.%02u", dev->name, GPIO_INT.port->name,
+	LOG_DBG("%s: int on %s.%02u", dev->name, GPIO_INT.port->name,
 				      GPIO_INT.pin);
 
 	gpio_init_callback(&lis2dw12->gpio_cb,

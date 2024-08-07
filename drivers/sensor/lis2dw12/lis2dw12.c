@@ -181,12 +181,14 @@ static int lis2dw12_config(const struct device *dev, enum sensor_channel chan,
 		}
 
 		if (val->val1 == CONFIGURE_INT_PIN) {
-			LOG_INF("Configure INT pin %d", val->val2);
-			pin_num = val->val2;
+#ifdef CONFIG_LIS2DW12_TRIGGER
+			LOG_DBG("Configure INT pin %d", val->val2);
+			lis2dw12_pin_number = val->val2;
 			lis2dw12_init_interrupt(dev);
+#endif /* CONFIG_LIS2DW12_TRIGGER */
 			return 0;
 		}
-	
+
 	default:
 		LOG_DBG("Acc attribute not supported");
 		break;
@@ -490,6 +492,14 @@ static int lis2dw12_init(const struct device *dev)
 		return ret;
 	}
 
+#ifdef CONFIG_LIS2DW12_THRESHOLD
+	ret = lis2dw12_wkup_dur_set(ctx, cfg->wakeup_duration);
+	if (ret < 0) {
+		LOG_ERR("wakeup duration config error %d", ret);
+		return ret;
+	}
+#endif /* CONFIG_LIS2DW12_THRESHOLD */
+
 	return 0;
 }
 
@@ -535,6 +545,13 @@ static int lis2dw12_init(const struct device *dev)
 #define LIS2DW12_CONFIG_FREEFALL(inst)
 #endif /* CONFIG_LIS2DW12_FREEFALL */
 
+#ifdef CONFIG_LIS2DW12_THRESHOLD
+#define LIS2DW12_CONFIG_THRESHOLD(inst)					\
+	.wakeup_duration = DT_INST_PROP(inst, wakeup_duration),
+#else
+#define LIS2DW12_CONFIG_THRESHOLD(inst)
+#endif
+
 #ifdef CONFIG_LIS2DW12_TRIGGER
 #define LIS2DW12_CFG_IRQ(inst) \
 	.gpio_int1 = GPIO_DT_SPEC_INST_GET_BY_IDX_OR(inst, irq_gpios, 0, {}),\
@@ -555,6 +572,7 @@ static int lis2dw12_init(const struct device *dev)
 	.drdy_pulsed = DT_INST_PROP(inst, drdy_pulsed),			\
 	LIS2DW12_CONFIG_TAP(inst)					\
 	LIS2DW12_CONFIG_FREEFALL(inst)					\
+	LIS2DW12_CONFIG_THRESHOLD(inst)					\
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, irq_gpios),		\
 			(LIS2DW12_CFG_IRQ(inst)), ())
 
