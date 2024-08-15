@@ -603,6 +603,10 @@ static int cmd_wifi_scan(const struct shell *sh, size_t argc, char *argv[])
 	}
 
 	if (do_scan) {
+		if (!iface) {
+			shell_fprintf(sh, SHELL_ERROR, "No valid iface found\n");
+			return -ENODEV;
+		}
 		if (net_mgmt(NET_REQUEST_WIFI_SCAN, iface, &params, sizeof(params))) {
 			shell_fprintf(sh, SHELL_WARNING, "Scan request failed\n");
 			return -ENOEXEC;
