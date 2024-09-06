@@ -63,6 +63,7 @@ static const struct event_reg_t event_reg[NPM1300_EVENT_MAX] = {
 	[NPM1300_EVENT_CHG_ERROR] = {0x0AU, 0x20U},
 	[NPM1300_EVENT_BATTERY_DETECTED] = {0x0EU, 0x01U},
 	[NPM1300_EVENT_BATTERY_REMOVED] = {0x0EU, 0x02U},
+	[NPM1300_EVENT_BATTERY_RECHARGE] = {0x0EU, 0x04U},
 	[NPM1300_EVENT_SHIPHOLD_PRESS] = {0x12U, 0x01U},
 	[NPM1300_EVENT_SHIPHOLD_RELEASE] = {0x12U, 0x02U},
 	[NPM1300_EVENT_WATCHDOG_WARN] = {0x12U, 0x08U},
@@ -283,6 +284,18 @@ int mfd_npm1300_add_callback(const struct device *dev, struct gpio_callback *cal
 int mfd_npm1300_remove_callback(const struct device *dev, struct gpio_callback *callback)
 {
 	struct mfd_npm1300_data *data = dev->data;
+
+	/* Disable interrupts for specified events */
+	for (int i = 0; i < NPM1300_EVENT_MAX; i++) {
+		if ((callback->pin_mask & BIT(i)) != 0U) {
+			int ret = mfd_npm1300_reg_write(data->dev, MAIN_BASE,
+						    event_reg[i].offset + MAIN_OFFSET_INTENCLR,
+						    event_reg[i].mask);
+			if (ret < 0) {
+				return ret;
+			}
+		}
+	}
 
 	return gpio_manage_callback(&data->callbacks, callback, false);
 }
