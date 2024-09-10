@@ -131,9 +131,8 @@ static inline void ed070ec1_busy_wait(const struct device *dev)
 {
 	const struct ed070ec1_config *config = dev->config;
 	int pin = gpio_pin_get_dt(&config->busy_gpio);
-	uint8_t cnt = 20; /* 20 ms */
 
-	while (pin > 0 && cnt--) {
+	while (pin > 0) {
 		__ASSERT(pin >= 0, "Failed to get pin level");
 		k_msleep(ED070EC1_BUSY_DELAY);
 		pin = gpio_pin_get_dt(&config->busy_gpio);
