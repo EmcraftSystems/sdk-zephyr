@@ -14,13 +14,10 @@
 
 #include <zephyr/drivers/gpio/gpio_utils.h>
 
-#define PIN_NUM_MAX 16
-
 struct gpio_nrfx_data {
 	/* gpio_driver_data needs to be first */
 	struct gpio_driver_data common;
 	sys_slist_t callbacks;
-	uint32_t counters[PIN_NUM_MAX];
 };
 
 struct gpio_nrfx_cfg {
@@ -383,10 +380,6 @@ static void nrfx_gpio_handler(nrfx_gpiote_pin_t abs_pin,
 
 	struct gpio_nrfx_data *data = get_port_data(port);
 	sys_slist_t *list = &data->callbacks;
-
-	if (pin < PIN_NUM_MAX) {
-		data->counters[pin]++;
-	}
 
 	gpio_fire_callbacks(list, port, BIT(pin));
 }
