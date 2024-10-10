@@ -148,6 +148,8 @@ static int lps22hh_set_int_s(stmdev_ctx_t *ctx, uint8_t int_s)
 		ctrl_reg3.int_s = int_s;
 		ret = lps22hh_write_reg(ctx, LPS22HH_CTRL_REG3, (uint8_t *)&ctrl_reg3, 1);
 	}
+
+	return 0;
 }
 
 static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
