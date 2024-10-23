@@ -15,6 +15,11 @@ LOG_MODULE_REGISTER(cfb);
 STRUCT_SECTION_START_EXTERN(cfb_font);
 STRUCT_SECTION_END_EXTERN(cfb_font);
 
+#define DISP_NUM_PARTS (4)
+#define DISP_BUF_SIZE (960 * 640 / 8)
+
+static uint8_t fb_buf[DISP_BUF_SIZE];
+
 static inline uint8_t byte_reverse(uint8_t b)
 {
 	b = (b & 0xf0) >> 4 | (b & 0x0f) << 4;
@@ -115,7 +120,7 @@ static uint8_t draw_char_vtmono(const struct char_framebuffer *fb,
 			 */
 
 			const int16_t fb_y = y + g_y;
-			const size_t fb_index = (fb_y / 8U) * fb->x_res + fb_x;
+			const size_t fb_index = (fb->x_res / 8U) * fb_x + fb_y / 8U;
 			const size_t offset = y % 8;
 			uint8_t bg_mask;
 			uint8_t byte;
@@ -124,7 +129,10 @@ static uint8_t draw_char_vtmono(const struct char_framebuffer *fb,
 				continue;
 			}
 
-			byte = get_glyph_byte(glyph_ptr, fptr, g_x, g_y / 8);
+			byte = get_glyph_byte(glyph_ptr, fptr, g_x / 8U, g_y);
+
+			LOG_DBG("byte: %02x, fb_x: %d, fb_y: %d g_y: %d index: %d",
+						byte, fb_x, fb_y, g_y, fb_index);
 
 			if (offset == 0) {
 				/*
@@ -439,25 +447,35 @@ int cfb_framebuffer_finalize(const struct device *dev)
 	const struct display_driver_api *api = dev->api;
 	const struct char_framebuffer *fb = &char_fb;
 	struct display_buffer_descriptor desc;
-	int err;
+	int err = 0;
+	bool invert = !(fb->pixel_format & PIXEL_FORMAT_MONO10) != !(fb->inverted);
 
 	if (!fb || !fb->buf) {
 		return -ENODEV;
 	}
 
-	desc.buf_size = fb->size;
+	desc.buf_size = fb->size / DISP_NUM_PARTS;
 	desc.width = fb->x_res;
-	desc.height = fb->y_res;
+	desc.height = fb->y_res / DISP_NUM_PARTS;
 	desc.pitch = fb->x_res;
 
-	if (!(fb->pixel_format & PIXEL_FORMAT_MONO10) != !(fb->inverted)) {
+	if (invert) {
 		cfb_invert(fb);
-		err = api->write(dev, 0, 0, &desc, fb->buf);
-		cfb_invert(fb);
-		return err;
 	}
 
-	return api->write(dev, 0, 0, &desc, fb->buf);
+	api->blanking_on(dev);
+
+	for (int i = 0; i < fb->y_res; i += fb->y_res / DISP_NUM_PARTS) {
+		err = api->write(dev, 0, i, &desc, &fb->buf[i * (fb->x_res / 8U)]);
+	}
+
+	api->blanking_off(dev);
+
+	if (invert) {
+		cfb_invert(fb);
+	}
+
+	return err;
 }
 
 int cfb_get_display_parameter(const struct device *dev,
@@ -552,18 +570,22 @@ int cfb_framebuffer_init(const struct device *dev)
 	fb->screen_info = cfg.screen_info;
 	fb->buf = NULL;
 	fb->kerning = 0;
-	fb->inverted = false;
+	fb->inverted = true;
 
 	fb->fonts = TYPE_SECTION_START(cfb_font);
 	fb->font_idx = 0U;
 
 	fb->size = fb->x_res * fb->y_res / fb->ppt;
-	fb->buf = k_malloc(fb->size);
-	if (!fb->buf) {
-		return -ENOMEM;
-	}
+	fb->buf = (uint8_t *) fb_buf;
 
 	memset(fb->buf, 0, fb->size);
 
 	return 0;
+}
+
+uint8_t *cfb_get_fb(void)
+{
+	struct char_framebuffer *fb = &char_fb;
+
+	return fb->buf;
 }
