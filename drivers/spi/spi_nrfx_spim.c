@@ -340,7 +340,7 @@ static void finish_transaction(const struct device *dev, int error)
 	dev_data->busy = false;
 
 	finalize_spi_transaction(dev, true);
-	(void)pm_device_runtime_put(dev);
+	(void)pm_device_runtime_put_async(dev);
 }
 
 static void transfer_next_chunk(const struct device *dev)
