@@ -241,6 +241,13 @@ int cfb_get_numof_fonts(const struct device *dev);
  */
 int cfb_framebuffer_init(const struct device *dev);
 
+/**
+ * @brief Get pointer to Character Framebuffer buffer
+ *
+ * @return pointer to buffer
+ */
+uint8_t *cfb_get_fb(void);
+
 #ifdef __cplusplus
 }
 #endif
