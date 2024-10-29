@@ -194,8 +194,8 @@ static uint8_t draw_char_vtmono(const struct char_framebuffer *fb,
 static inline void draw_point(struct char_framebuffer *fb, int16_t x, int16_t y)
 {
 	const bool need_reverse = ((fb->screen_info & SCREEN_INFO_MONO_MSB_FIRST) != 0);
-	const size_t index = ((y / 8) * fb->x_res);
-	uint8_t m = BIT(y % 8);
+	const size_t index = ((fb->x_res / 8U) * y);
+	uint8_t m = BIT(x % 8);
 
 	if (x < 0 || x >= fb->x_res) {
 		return;
@@ -209,7 +209,7 @@ static inline void draw_point(struct char_framebuffer *fb, int16_t x, int16_t y)
 		m = byte_reverse(m);
 	}
 
-	fb->buf[index + x] |= m;
+	fb->buf[index + (x / 8U)] ^= ~m;
 }
 
 static void draw_line(struct char_framebuffer *fb, int16_t x0, int16_t y0, int16_t x1, int16_t y1)
