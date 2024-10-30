@@ -86,7 +86,8 @@ static inline bool spi_context_is_slave(struct spi_context *ctx)
 	return (ctx->config->operation & SPI_OP_MODE_SLAVE);
 }
 
-static inline void spi_context_lock(struct spi_context *ctx,
+static inline void spi_context_lock_pm(const struct device *dev,
+				    struct spi_context *ctx,
 				    bool asynchronous,
 				    spi_callback_t callback,
 				    void *callback_data,
@@ -99,6 +100,9 @@ static inline void spi_context_lock(struct spi_context *ctx,
 	}
 
 	k_sem_take(&ctx->lock, K_FOREVER);
+	if (dev) {
+		pm_device_runtime_get(dev);
+	}
 	ctx->owner = spi_cfg;
 
 #ifdef CONFIG_SPI_ASYNC
@@ -108,7 +112,18 @@ static inline void spi_context_lock(struct spi_context *ctx,
 #endif /* CONFIG_SPI_ASYNC */
 }
 
-static inline void spi_context_release(struct spi_context *ctx, int status)
+static inline void spi_context_lock(struct spi_context *ctx,
+				    bool asynchronous,
+				    spi_callback_t callback,
+				    void *callback_data,
+				    const struct spi_config *spi_cfg)
+{
+	spi_context_lock_pm(NULL, ctx, asynchronous,
+				callback, callback_data, spi_cfg);
+}
+
+static inline void spi_context_release_pm(const struct device *dev,
+					struct spi_context *ctx, int status)
 {
 #ifdef CONFIG_SPI_SLAVE
 	if (status >= 0 && (ctx->config->operation & SPI_LOCK_ON)) {
@@ -119,14 +134,25 @@ static inline void spi_context_release(struct spi_context *ctx, int status)
 #ifdef CONFIG_SPI_ASYNC
 	if (!ctx->asynchronous || (status < 0)) {
 		ctx->owner = NULL;
+		if (dev) {
+			pm_device_runtime_put_async(dev);
+		}
 		k_sem_give(&ctx->lock);
 	}
 #else
 	if (!(ctx->config->operation & SPI_LOCK_ON)) {
 		ctx->owner = NULL;
+		if (dev) {
+			pm_device_runtime_put_async(dev);
+		}
 		k_sem_give(&ctx->lock);
 	}
 #endif /* CONFIG_SPI_ASYNC */
+}
+
+static inline void spi_context_release(struct spi_context *ctx, int status)
+{
+	spi_context_release_pm(NULL, ctx, status);
 }
 
 static inline size_t spi_context_total_tx_len(struct spi_context *ctx);
@@ -180,7 +206,7 @@ static inline int spi_context_wait_for_completion(struct spi_context *ctx)
 	return status;
 }
 
-static inline void spi_context_complete(struct spi_context *ctx,
+static inline void spi_context_complete_pm(int do_pm, struct spi_context *ctx,
 					const struct device *dev,
 					int status)
 {
@@ -203,6 +229,9 @@ static inline void spi_context_complete(struct spi_context *ctx,
 
 		if (!(ctx->config->operation & SPI_LOCK_ON)) {
 			ctx->owner = NULL;
+			if (do_pm) {
+				pm_device_runtime_put_async(dev);
+			}
 			k_sem_give(&ctx->lock);
 		}
 	}
@@ -210,6 +239,13 @@ static inline void spi_context_complete(struct spi_context *ctx,
 	ctx->sync_status = status;
 	k_sem_give(&ctx->sync);
 #endif /* CONFIG_SPI_ASYNC */
+}
+
+static inline void spi_context_complete(struct spi_context *ctx,
+					const struct device *dev,
+					int status)
+{
+	spi_context_complete_pm(0, ctx, dev, status);
 }
 
 static inline int spi_context_cs_configure_all(struct spi_context *ctx)
@@ -257,15 +293,25 @@ static inline void spi_context_cs_control(struct spi_context *ctx, bool on)
 	_spi_context_cs_control(ctx, on, false);
 }
 
-static inline void spi_context_unlock_unconditionally(struct spi_context *ctx)
+static inline void spi_context_unlock_unconditionally_pm(
+						const struct device *dev,
+						struct spi_context *ctx)
 {
 	/* Forcing CS to go to inactive status */
 	_spi_context_cs_control(ctx, false, true);
 
 	if (!k_sem_count_get(&ctx->lock)) {
 		ctx->owner = NULL;
+		if (dev) {
+			pm_device_runtime_put_async(dev);
+		}
 		k_sem_give(&ctx->lock);
 	}
+}
+
+static inline void spi_context_unlock_unconditionally(struct spi_context *ctx)
+{
+	spi_context_unlock_unconditionally_pm(NULL, ctx);
 }
 
 static inline void *spi_context_get_next_buf(const struct spi_buf **current,

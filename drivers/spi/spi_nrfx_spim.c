@@ -231,11 +231,8 @@ static int configure(const struct device *dev,
 			    spi_cfg->operation & SPI_MODE_CPOL ? 1 : 0);
 
 	ctx->config = spi_cfg;
-#ifdef CONFIG_PM_DEVICE_RUNTIME
-	ret = pm_device_runtime_get(dev);
-#else
+
 	ret = spim_init(dev);
-#endif
 	if (ret < 0) {
 
 		return ret;
@@ -336,11 +333,10 @@ static void finish_transaction(const struct device *dev, int error)
 
 	LOG_DBG("Transaction finished with status %d", error);
 
-	spi_context_complete(ctx, dev, error);
+	finalize_spi_transaction(dev, true);
 	dev_data->busy = false;
 
-	finalize_spi_transaction(dev, true);
-	(void)pm_device_runtime_put_async(dev);
+	spi_context_complete_pm(1, ctx, dev, error);
 }
 
 static void transfer_next_chunk(const struct device *dev)
@@ -477,7 +473,8 @@ static int transceive(const struct device *dev,
 	void *reg = dev_config->spim.p_reg;
 	int error;
 
-	spi_context_lock(&dev_data->ctx, asynchronous, cb, userdata, spi_cfg);
+	spi_context_lock_pm(dev, &dev_data->ctx, asynchronous,
+				cb, userdata, spi_cfg);
 
 	error = configure(dev, spi_cfg);
 	if (error == 0) {
@@ -533,7 +530,7 @@ static int transceive(const struct device *dev,
 		}
 	}
 
-	spi_context_release(&dev_data->ctx, error);
+	spi_context_release_pm(dev, &dev_data->ctx, error);
 
 	return error;
 }
@@ -571,8 +568,8 @@ static int spi_nrfx_release(const struct device *dev,
 		return -EBUSY;
 	}
 
-	spi_context_unlock_unconditionally(&dev_data->ctx);
 	finalize_spi_transaction(dev, false);
+	spi_context_unlock_unconditionally_pm(dev, &dev_data->ctx);
 
 	return 0;
 }
@@ -585,45 +582,41 @@ static const struct spi_driver_api spi_nrfx_driver_api = {
 	.release = spi_nrfx_release,
 };
 
-#ifdef CONFIG_PM_DEVICE
 static int spim_nrfx_pm_action(const struct device *dev,
 			       enum pm_device_action action)
 {
-	int ret = 0;
+	int ret = -ENOTSUP;
 	struct spi_nrfx_data *dev_data = dev->data;
 	const struct spi_nrfx_config *dev_config = dev->config;
 
 	switch (action) {
+	case PM_DEVICE_ACTION_TURN_ON:
+		ret = 0;
+		break;
+
 	case PM_DEVICE_ACTION_RESUME:
 		ret = pinctrl_apply_state(dev_config->pcfg,
 					  PINCTRL_STATE_DEFAULT);
-		if (ret < 0) {
-			return ret;
-		}
-		ret = spim_init(dev);
 		break;
 
 	case PM_DEVICE_ACTION_SUSPEND:
-		if (dev_data->initialized) {
-			nrfx_spim_uninit(&dev_config->spim);
-			dev_data->initialized = false;
-		}
+		if (IS_ENABLED(CONFIG_PM_DEVICE)) {
+			if (dev_data->initialized) {
+				nrfx_spim_uninit(&dev_config->spim);
+				dev_data->initialized = false;
+			}
 
-		ret = pinctrl_apply_state(dev_config->pcfg,
-					  PINCTRL_STATE_SLEEP);
-		if (ret < 0) {
-			return ret;
+			ret = pinctrl_apply_state(dev_config->pcfg,
+						  PINCTRL_STATE_SLEEP);
 		}
 		break;
 
 	default:
-		ret = -ENOTSUP;
+		break;
 	}
 
 	return ret;
 }
-#endif /* CONFIG_PM_DEVICE */
-
 
 static int spi_nrfx_init(const struct device *dev)
 {
@@ -660,16 +653,14 @@ static int spi_nrfx_init(const struct device *dev)
 
 	spi_context_unlock_unconditionally(&dev_data->ctx);
 
-#ifdef CONFIG_PM_DEVICE_RUNTIME
-	pm_device_init_suspended(dev);
-	pm_device_runtime_enable(dev);
-#endif
-
 #ifdef CONFIG_SOC_NRF52832_ALLOW_SPIM_DESPITE_PAN_58
-	return anomaly_58_workaround_init(dev);
-#else
-	return 0;
+	err = anomaly_58_workaround_init(dev);
+	if (err < 0) {
+		return err;
+	}
 #endif
+	err = pm_device_driver_init(dev, spim_nrfx_pm_action);
+	return err;
 }
 /*
  * We use NODELABEL here because the nrfx API requires us to call
