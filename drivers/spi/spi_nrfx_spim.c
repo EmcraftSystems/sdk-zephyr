@@ -5,8 +5,11 @@
  */
 
 #include <zephyr/drivers/spi.h>
+#include <zephyr/cache.h>
 #include <zephyr/pm/device.h>
+#include <zephyr/pm/device_runtime.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/mem_mgmt/mem_attr.h>
 #include <soc.h>
 #ifdef CONFIG_SOC_NRF52832_ALLOW_SPIM_DESPITE_PAN_58
 #include <nrfx_ppi.h>
@@ -64,9 +67,27 @@ struct spi_nrfx_config {
 #endif
 	uint32_t wake_pin;
 	nrfx_gpiote_t wake_gpiote;
+#ifdef CONFIG_DCACHE
+	uint32_t mem_attr;
+#endif
 };
 
 static void event_handler(const nrfx_spim_evt_t *p_event, void *p_context);
+
+static inline void finalize_spi_transaction(const struct device *dev, bool deactivate_cs)
+{
+	struct spi_nrfx_data *dev_data = dev->data;
+	const struct spi_nrfx_config *dev_config = dev->config;
+	void *reg = dev_config->spim.p_reg;
+
+	if (deactivate_cs) {
+		spi_context_cs_control(&dev_data->ctx, false);
+	}
+
+	if (NRF_SPIM_IS_320MHZ_SPIM(reg) && !(dev_data->ctx.config->operation & SPI_HOLD_ON_CS)) {
+		nrfy_spim_disable(reg);
+	}
+}
 
 static inline uint32_t get_nrf_spim_frequency(uint32_t frequency)
 {
@@ -119,15 +140,56 @@ static inline nrf_spim_bit_order_t get_nrf_spim_bit_order(uint16_t operation)
 	}
 }
 
+static int spim_init(const struct device *dev)
+{
+	struct spi_nrfx_data *dev_data = dev->data;
+	const struct spi_nrfx_config *dev_config = dev->config;
+	nrfx_spim_config_t config;
+	struct spi_context *ctx = &dev_data->ctx;
+	const struct spi_config *spi_cfg = ctx->config;
+	uint32_t max_freq = dev_config->max_freq;
+	nrfx_err_t result = NRFX_SUCCESS;
+
+#if defined(CONFIG_SOC_NRF5340_CPUAPP)
+	/* On nRF5340, the 32 Mbps speed is supported by the application core
+	 * when it is running at 128 MHz (see the Timing specifications section
+	 * in the nRF5340 PS).
+	 */
+	if (max_freq > 16000000 &&
+	    nrf_clock_hfclk_div_get(NRF_CLOCK) != NRF_CLOCK_HFCLK_DIV_1) {
+		max_freq = 16000000;
+	}
+#endif
+
+	config = dev_config->def_config;
+
+	/* Limit the frequency to that supported by the SPIM instance. */
+	config.frequency = get_nrf_spim_frequency(MIN(spi_cfg->frequency,
+						max_freq));
+	config.mode      = get_nrf_spim_mode(spi_cfg->operation);
+	config.bit_order = get_nrf_spim_bit_order(spi_cfg->operation);
+
+	if (dev_data->initialized) {
+		nrfx_spim_uninit(&dev_config->spim);
+		dev_data->initialized = false;
+	}
+
+	result = nrfx_spim_init(&dev_config->spim, &config,
+			event_handler, (void *)dev);
+	if (result != NRFX_SUCCESS) {
+		LOG_ERR("Failed to initialize nrfx driver: %08x", result);
+		return -EIO;
+	}
+	return 0;
+}
+
 static int configure(const struct device *dev,
 		     const struct spi_config *spi_cfg)
 {
 	struct spi_nrfx_data *dev_data = dev->data;
 	const struct spi_nrfx_config *dev_config = dev->config;
 	struct spi_context *ctx = &dev_data->ctx;
-	uint32_t max_freq = dev_config->max_freq;
-	nrfx_spim_config_t config;
-	nrfx_err_t result;
+	int ret;
 
 	if (dev_data->initialized && spi_context_configured(ctx, spi_cfg)) {
 		/* Already configured. No need to do it again. */
@@ -165,43 +227,18 @@ static int configure(const struct device *dev,
 		return -EINVAL;
 	}
 
-#if defined(CONFIG_SOC_NRF5340_CPUAPP)
-	/* On nRF5340, the 32 Mbps speed is supported by the application core
-	 * when it is running at 128 MHz (see the Timing specifications section
-	 * in the nRF5340 PS).
-	 */
-	if (max_freq > 16000000 &&
-	    nrf_clock_hfclk_div_get(NRF_CLOCK) != NRF_CLOCK_HFCLK_DIV_1) {
-		max_freq = 16000000;
-	}
-#endif
-
-	config = dev_config->def_config;
-
-	/* Limit the frequency to that supported by the SPIM instance. */
-	config.frequency = get_nrf_spim_frequency(MIN(spi_cfg->frequency,
-						      max_freq));
-	config.mode      = get_nrf_spim_mode(spi_cfg->operation);
-	config.bit_order = get_nrf_spim_bit_order(spi_cfg->operation);
-
 	nrfy_gpio_pin_write(nrfy_spim_sck_pin_get(dev_config->spim.p_reg),
 			    spi_cfg->operation & SPI_MODE_CPOL ? 1 : 0);
 
-	if (dev_data->initialized) {
-		nrfx_spim_uninit(&dev_config->spim);
-		dev_data->initialized = false;
-	}
+	ctx->config = spi_cfg;
 
-	result = nrfx_spim_init(&dev_config->spim, &config,
-				event_handler, dev_data);
-	if (result != NRFX_SUCCESS) {
-		LOG_ERR("Failed to initialize nrfx driver: %08x", result);
-		return -EIO;
+	ret = spim_init(dev);
+	if (ret < 0) {
+
+		return ret;
 	}
 
 	dev_data->initialized = true;
-
-	ctx->config = spi_cfg;
 
 	return 0;
 }
@@ -296,8 +333,10 @@ static void finish_transaction(const struct device *dev, int error)
 
 	LOG_DBG("Transaction finished with status %d", error);
 
-	spi_context_complete(ctx, dev, error);
+	finalize_spi_transaction(dev, true);
 	dev_data->busy = false;
+
+	spi_context_complete_pm(1, ctx, dev, error);
 }
 
 static void transfer_next_chunk(const struct device *dev)
@@ -328,6 +367,11 @@ static void transfer_next_chunk(const struct device *dev)
 			}
 
 			memcpy(dev_data->tx_buffer, tx_buf, chunk_len);
+#ifdef CONFIG_DCACHE
+			if (dev_config->mem_attr & DT_MEM_CACHEABLE) {
+				sys_cache_data_flush_range(dev_data->tx_buffer, chunk_len);
+			}
+#endif
 			tx_buf = dev_data->tx_buffer;
 		}
 
@@ -377,7 +421,11 @@ static void transfer_next_chunk(const struct device *dev)
 
 static void event_handler(const nrfx_spim_evt_t *p_event, void *p_context)
 {
-	struct spi_nrfx_data *dev_data = p_context;
+	const struct device *dev = p_context;
+	struct spi_nrfx_data *dev_data = dev->data;
+#ifdef CONFIG_DCACHE
+	const struct spi_nrfx_config *dev_config = dev->config;
+#endif
 
 	if (p_event->type == NRFX_SPIM_EVENT_DONE) {
 		/* Chunk length is set to 0 when a transaction is aborted
@@ -395,6 +443,11 @@ static void event_handler(const nrfx_spim_evt_t *p_event, void *p_context)
 		if (spi_context_rx_buf_on(&dev_data->ctx) &&
 		    p_event->xfer_desc.p_rx_buffer != NULL &&
 		    p_event->xfer_desc.p_rx_buffer != dev_data->ctx.rx_buf) {
+#ifdef CONFIG_DCACHE
+			if (dev_config->mem_attr & DT_MEM_CACHEABLE) {
+				sys_cache_data_invd_range(dev_data->rx_buffer, dev_data->chunk_len);
+			}
+#endif
 			(void)memcpy(dev_data->ctx.rx_buf,
 				     dev_data->rx_buffer,
 				     dev_data->chunk_len);
@@ -417,9 +470,11 @@ static int transceive(const struct device *dev,
 {
 	struct spi_nrfx_data *dev_data = dev->data;
 	const struct spi_nrfx_config *dev_config = dev->config;
+	void *reg = dev_config->spim.p_reg;
 	int error;
 
-	spi_context_lock(&dev_data->ctx, asynchronous, cb, userdata, spi_cfg);
+	spi_context_lock_pm(dev, &dev_data->ctx, asynchronous,
+				cb, userdata, spi_cfg);
 
 	error = configure(dev, spi_cfg);
 	if (error == 0) {
@@ -439,6 +494,9 @@ static int transceive(const struct device *dev,
 		}
 
 		spi_context_buffers_setup(&dev_data->ctx, tx_bufs, rx_bufs, 1);
+		if (NRF_SPIM_IS_320MHZ_SPIM(reg)) {
+			nrfy_spim_enable(reg);
+		}
 		spi_context_cs_control(&dev_data->ctx, true);
 
 		transfer_next_chunk(dev);
@@ -467,12 +525,12 @@ static int transceive(const struct device *dev,
 #ifdef CONFIG_SOC_NRF52832_ALLOW_SPIM_DESPITE_PAN_58
 			anomaly_58_workaround_clear(dev_data);
 #endif
+		} else if (error) {
+			finalize_spi_transaction(dev, true);
 		}
-
-		spi_context_cs_control(&dev_data->ctx, false);
 	}
 
-	spi_context_release(&dev_data->ctx, error);
+	spi_context_release_pm(dev, &dev_data->ctx, error);
 
 	return error;
 }
@@ -510,7 +568,8 @@ static int spi_nrfx_release(const struct device *dev,
 		return -EBUSY;
 	}
 
-	spi_context_unlock_unconditionally(&dev_data->ctx);
+	finalize_spi_transaction(dev, false);
+	spi_context_unlock_unconditionally_pm(dev, &dev_data->ctx);
 
 	return 0;
 }
@@ -523,47 +582,41 @@ static const struct spi_driver_api spi_nrfx_driver_api = {
 	.release = spi_nrfx_release,
 };
 
-#ifdef CONFIG_PM_DEVICE
 static int spim_nrfx_pm_action(const struct device *dev,
 			       enum pm_device_action action)
 {
-	int ret = 0;
+	int ret = -ENOTSUP;
 	struct spi_nrfx_data *dev_data = dev->data;
 	const struct spi_nrfx_config *dev_config = dev->config;
 
 	switch (action) {
+	case PM_DEVICE_ACTION_TURN_ON:
+		ret = 0;
+		break;
+
 	case PM_DEVICE_ACTION_RESUME:
 		ret = pinctrl_apply_state(dev_config->pcfg,
 					  PINCTRL_STATE_DEFAULT);
-		if (ret < 0) {
-			return ret;
-		}
-		/* nrfx_spim_init() will be called at configuration before
-		 * the next transfer.
-		 */
 		break;
 
 	case PM_DEVICE_ACTION_SUSPEND:
-		if (dev_data->initialized) {
-			nrfx_spim_uninit(&dev_config->spim);
-			dev_data->initialized = false;
-		}
+		if (IS_ENABLED(CONFIG_PM_DEVICE)) {
+			if (dev_data->initialized) {
+				nrfx_spim_uninit(&dev_config->spim);
+				dev_data->initialized = false;
+			}
 
-		ret = pinctrl_apply_state(dev_config->pcfg,
-					  PINCTRL_STATE_SLEEP);
-		if (ret < 0) {
-			return ret;
+			ret = pinctrl_apply_state(dev_config->pcfg,
+						  PINCTRL_STATE_SLEEP);
 		}
 		break;
 
 	default:
-		ret = -ENOTSUP;
+		break;
 	}
 
 	return ret;
 }
-#endif /* CONFIG_PM_DEVICE */
-
 
 static int spi_nrfx_init(const struct device *dev)
 {
@@ -571,7 +624,10 @@ static int spi_nrfx_init(const struct device *dev)
 	struct spi_nrfx_data *dev_data = dev->data;
 	int err;
 
-	err = pinctrl_apply_state(dev_config->pcfg, PINCTRL_STATE_DEFAULT);
+	err = pinctrl_apply_state(dev_config->pcfg,
+				  COND_CODE_1(CONFIG_PM_DEVICE_RUNTIME,
+					      (PINCTRL_STATE_SLEEP),
+					      (PINCTRL_STATE_DEFAULT)));
 	if (err < 0) {
 		return err;
 	}
@@ -598,10 +654,13 @@ static int spi_nrfx_init(const struct device *dev)
 	spi_context_unlock_unconditionally(&dev_data->ctx);
 
 #ifdef CONFIG_SOC_NRF52832_ALLOW_SPIM_DESPITE_PAN_58
-	return anomaly_58_workaround_init(dev);
-#else
-	return 0;
+	err = anomaly_58_workaround_init(dev);
+	if (err < 0) {
+		return err;
+	}
 #endif
+	err = pm_device_driver_init(dev, spim_nrfx_pm_action);
+	return err;
 }
 /*
  * We use NODELABEL here because the nrfx API requires us to call
@@ -612,6 +671,7 @@ static int spi_nrfx_init(const struct device *dev)
 #define SPIM(idx)			DT_NODELABEL(spi##idx)
 #define SPIM_PROP(idx, prop)		DT_PROP(SPIM(idx), prop)
 #define SPIM_HAS_PROP(idx, prop)	DT_NODE_HAS_PROP(SPIM(idx), prop)
+#define SPIM_MEM_REGION(idx)		DT_PHANDLE(SPIM(idx), memory_regions)
 
 #define SPI_NRFX_SPIM_EXTENDED_CONFIG(idx)				\
 	IF_ENABLED(NRFX_SPIM_EXTENDED_ENABLED,				\
@@ -620,6 +680,13 @@ static int spi_nrfx_init(const struct device *dev)
 			     (.rx_delay = SPIM_PROP(idx, rx_delay),),	\
 			     ())					\
 		))
+
+#define SPIM_GET_MEM_ATTR(idx)								 \
+	COND_CODE_1(SPIM_HAS_PROP(idx, memory_regions),					 \
+		(COND_CODE_1(DT_NODE_HAS_PROP(SPIM_MEM_REGION(idx), zephyr_memory_attr), \
+			(DT_PROP(SPIM_MEM_REGION(idx), zephyr_memory_attr)),		 \
+			(0))),								 \
+		(0))
 
 #define SPI_NRFX_SPIM_DEFINE(idx)					       \
 	NRF_DT_CHECK_NODE_HAS_PINCTRL_SLEEP(SPIM(idx));			       \
@@ -669,6 +736,8 @@ static int spi_nrfx_init(const struct device *dev)
 		.wake_pin = NRF_DT_GPIOS_TO_PSEL_OR(SPIM(idx), wake_gpios,     \
 						    WAKE_PIN_NOT_USED),	       \
 		.wake_gpiote = WAKE_GPIOTE_INSTANCE(SPIM(idx)),		       \
+		IF_ENABLED(CONFIG_DCACHE,				       \
+			(.mem_attr = SPIM_GET_MEM_ATTR(idx),))		       \
 	};								       \
 	BUILD_ASSERT(!SPIM_HAS_PROP(idx, wake_gpios) ||			       \
 		     !(DT_GPIO_FLAGS(SPIM(idx), wake_gpios) & GPIO_ACTIVE_LOW),\
@@ -685,7 +754,7 @@ static int spi_nrfx_init(const struct device *dev)
 #define SPIM_MEMORY_SECTION(idx)					       \
 	COND_CODE_1(SPIM_HAS_PROP(idx, memory_regions),			       \
 		(__attribute__((__section__(LINKER_DT_NODE_REGION_NAME(	       \
-			DT_PHANDLE(SPIM(idx), memory_regions)))))),	       \
+			SPIM_MEM_REGION(idx)))))),			       \
 		())
 
 #ifdef CONFIG_HAS_HW_NRF_SPIM0
