@@ -1,0 +1,26 @@
+# Copyright (c)  2024 Emcraft Systems
+# SPDX-License-Identifier: Apache-2.0
+
+description: NXP PCF85263A RTC
+
+compatible: "nxp,pcf85263a"
+
+include:
+  - name: rtc-device.yaml
+  - name: i2c-device.yaml
+  - name: pm.yaml
+    property-allowlist:
+      - wakeup-source
+
+properties:
+
+  inta-gpios:
+    type: phandle-array
+    description: |
+      GPIO connected to the PCF85263A INTA interrupt output. This signal is open-drain, active low.
+
+  inta-mode:
+    type: int
+    default: 0
+    description: |
+      INTA pin output mode.
