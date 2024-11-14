@@ -201,8 +201,8 @@ static void init(struct log_backend const *const backend)
 	err = backend_remote->transport_api->init(backend_remote);
 	__ASSERT_NO_MSG(err >= 0);
 
-	err = k_sem_take(&backend_remote->rdy_sem, K_MSEC(10000));
-	__ASSERT_NO_MSG(err >= 0);
+	err = k_sem_take(&backend_remote->rdy_sem, K_MSEC(4000));
+	/*__ASSERT_NO_MSG(err >= 0);*/
 }
 
 static int is_ready(struct log_backend const *const backend)

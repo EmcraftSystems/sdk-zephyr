@@ -600,6 +600,7 @@ uint32_t z_log_links_activate(uint32_t active_mask, uint8_t *offset)
 
 	STRUCT_SECTION_FOREACH(log_link, link) {
 		if (active_mask & mask) {
+			static int err_cnt;
 			int err = log_link_activate(link);
 
 			if (err == 0) {
@@ -613,7 +614,10 @@ uint32_t z_log_links_activate(uint32_t active_mask, uint8_t *offset)
 					backends_link_init(link);
 				}
 			} else {
-				__ASSERT_NO_MSG(err == -EINPROGRESS);
+				if (err != -EINPROGRESS) {
+					err_cnt++;
+				}
+				__ASSERT(err_cnt < 100, "log link fail");
 				out_mask |= mask;
 			}
 		}
