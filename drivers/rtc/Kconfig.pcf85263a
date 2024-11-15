@@ -1,0 +1,32 @@
+# NXP PCF85263A RTC
+
+# Copyright (c) 2024 Emcraft Systems
+# SPDX-License-Identifier: Apache-2.0
+
+config RTC_PCF85263A
+	bool "NXP PCF85263A RTC driver"
+	default y
+	depends on DT_HAS_NXP_PCF85263A_ENABLED
+	select I2C
+	help
+	  Enable the NXP PCF85263A RTC driver.
+
+if RTC_PCF85263A
+
+if RTC_ALARM || RTC_UPDATE
+
+config RTC_PCF85263A_THREAD_STACK_SIZE
+	int "Stack size for the PCF85263A interrupt thread"
+	default 512
+	help
+	  Size of the stack used for the thread handling interrupts and dispatching callbacks.
+
+config RTC_PCF85263A_THREAD_PRIO
+	int "Priority for the PCF85263A interrupt thread"
+	default 0
+	help
+	  Priority level for the thread handling interrupts and dispatching callbacks.
+
+endif # RTC_ALARM || RTC_UPDATE
+
+endif # RTC_PCF85263A
