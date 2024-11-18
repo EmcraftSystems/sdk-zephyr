@@ -180,6 +180,8 @@ static int spim_init(const struct device *dev)
 		LOG_ERR("Failed to initialize nrfx driver: %08x", result);
 		return -EIO;
 	}
+	dev_data->initialized = true;
+
 	return 0;
 }
 
@@ -234,11 +236,9 @@ static int configure(const struct device *dev,
 
 	ret = spim_init(dev);
 	if (ret < 0) {
-
+		LOG_ERR("spim_init() failed: %d", ret);
 		return ret;
 	}
-
-	dev_data->initialized = true;
 
 	return 0;
 }

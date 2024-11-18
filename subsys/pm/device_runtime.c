@@ -177,12 +177,27 @@ int pm_device_runtime_get(const struct device *dev)
 
 	pm->usage++;
 
+	/*
+	 * Check if the device has a pending suspend operation (not started
+	 * yet) and cancel it. This way we avoid unnecessary operations because
+	 * the device is actually active.
+	 */
+	if ((pm->state == PM_DEVICE_STATE_SUSPENDING) &&
+		((k_work_cancel_delayable(&pm->work) & K_WORK_RUNNING) == 0)) {
+		pm->state = PM_DEVICE_STATE_ACTIVE;
+		goto unlock;
+	}
+
 	if (!k_is_pre_kernel()) {
-		/* wait until possible async suspend is completed */
+		/*
+		 * If the device is already suspending there is
+		 * nothing else we can do but wait until it finishes.
+		 */
 		while (pm->state == PM_DEVICE_STATE_SUSPENDING) {
+			k_event_clear(&pm->event, EVENT_MASK);
 			k_sem_give(&pm->lock);
 
-			k_event_wait(&pm->event, EVENT_MASK, true, K_FOREVER);
+			k_event_wait(&pm->event, EVENT_MASK, false, K_FOREVER);
 
 			(void)k_sem_take(&pm->lock, K_FOREVER);
 		}
@@ -333,12 +348,19 @@ int pm_device_runtime_disable(const struct device *dev)
 		goto unlock;
 	}
 
-	/* wait until possible async suspend is completed */
 	if (!k_is_pre_kernel()) {
+		if ((pm->state == PM_DEVICE_STATE_SUSPENDING) &&
+			((k_work_cancel_delayable(&pm->work) & K_WORK_RUNNING) == 0)) {
+			pm->state = PM_DEVICE_STATE_ACTIVE;
+			goto clear_bit;
+		}
+
+		/* wait until possible async suspend is completed */
 		while (pm->state == PM_DEVICE_STATE_SUSPENDING) {
+			k_event_clear(&pm->event, EVENT_MASK);
 			k_sem_give(&pm->lock);
 
-			k_event_wait(&pm->event, EVENT_MASK, true, K_FOREVER);
+			k_event_wait(&pm->event, EVENT_MASK, false, K_FOREVER);
 
 			(void)k_sem_take(&pm->lock, K_FOREVER);
 		}
@@ -354,6 +376,7 @@ int pm_device_runtime_disable(const struct device *dev)
 		pm->state = PM_DEVICE_STATE_ACTIVE;
 	}
 
+clear_bit:
 	atomic_clear_bit(&pm->flags, PM_DEVICE_FLAG_RUNTIME_ENABLED);
 
 unlock:
