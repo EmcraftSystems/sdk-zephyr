@@ -193,7 +193,7 @@ static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
 
 	lps22hh_int_on_threshold_set(ctx, LPS22HH_POSITIVE);
 	lps22hh_set_int_s(ctx, LPS22HH_POSITIVE);
-	lps22hh_int_treshold_set(ctx, threshold);
+	lps22hh_int_threshold_set(ctx, threshold);
 
 	return 0;
 }
