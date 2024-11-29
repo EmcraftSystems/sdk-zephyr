@@ -600,8 +600,6 @@ def process_meta(zephyr_base, west_projs, modules, extra_modules=None,
             meta_projects.append(meta_project)
 
             off = False
-            if not meta_project.get("remote") or project.sha(MANIFEST_REV_BRANCH) != meta_project['revision'].removesuffix("-dirty"):
-                off = True
             if not meta_project.get('remote') or project.url != meta_project['remote']:
                 # Force manifest URL and set commit as 'off'
                 meta_project['url'] = project.url

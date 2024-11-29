@@ -24,17 +24,16 @@ LOG_MODULE_REGISTER(LPS22HH, CONFIG_SENSOR_LOG_LEVEL);
 
 static inline int lps22hh_set_odr_raw(const struct device *dev, uint8_t odr)
 {
-	const struct lps22hh_config * const cfg = dev->config;
+	const struct lps22hh_config *const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 
 	return lps22hh_data_rate_set(ctx, odr);
 }
 
-static int lps22hh_sample_fetch(const struct device *dev,
-				enum sensor_channel chan)
+static int lps22hh_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
 	struct lps22hh_data *data = dev->data;
-	const struct lps22hh_config * const cfg = dev->config;
+	const struct lps22hh_config *const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	uint32_t raw_press;
 	int16_t raw_temp;
@@ -82,8 +81,7 @@ static int lps22hh_sample_fetch(const struct device *dev,
 	return 0;
 }
 
-static inline void lps22hh_press_convert(struct sensor_value *val,
-					 int32_t raw_val)
+static inline void lps22hh_press_convert(struct sensor_value *val, int32_t raw_val)
 {
 	int32_t press_tmp = raw_val >> 8; /* raw value is left aligned (24 msb) */
 
@@ -98,16 +96,14 @@ static inline void lps22hh_press_convert(struct sensor_value *val,
 	val->val2 = (press_tmp % 40960) * 3125 / 128;
 }
 
-static inline void lps22hh_temp_convert(struct sensor_value *val,
-					int16_t raw_val)
+static inline void lps22hh_temp_convert(struct sensor_value *val, int16_t raw_val)
 {
 	/* Temperature sensitivity is 100 LSB/deg C */
 	val->val1 = raw_val / 100;
 	val->val2 = ((int32_t)raw_val % 100) * 10000;
 }
 
-static int lps22hh_channel_get(const struct device *dev,
-			       enum sensor_channel chan,
+static int lps22hh_channel_get(const struct device *dev, enum sensor_channel chan,
 			       struct sensor_value *val)
 {
 	struct lps22hh_data *data = dev->data;
@@ -148,10 +144,62 @@ static int lps22hh_odr_set(const struct device *dev, uint16_t freq)
 	return 0;
 }
 
-static int lps22hh_attr_set(const struct device *dev,
-			    enum sensor_channel chan,
-			    enum sensor_attribute attr,
-			    const struct sensor_value *val)
+static int lps22hh_mode_set(const struct device *dev, uint8_t mode)
+{
+	const struct lps22hh_config *const cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+
+	lps22hh_odr_t odr;
+
+	lps22hh_data_rate_get(ctx, &odr);
+
+	if (mode == LPS22HH_MODE_LOW_NOISE) {
+		odr |= 0x10;
+	} else {
+		odr &= ~0x10;
+	}
+
+	return lps22hh_data_rate_set(ctx, odr);
+}
+
+/* lps22hh_int_on_threshold_set() doesn't set int_s, only diff_en */
+static int lps22hh_set_int_s(stmdev_ctx_t *ctx, uint8_t int_s)
+{
+	lps22hh_ctrl_reg3_t ctrl_reg3;
+	int32_t ret;
+
+	ret = lps22hh_read_reg(ctx, LPS22HH_CTRL_REG3, (uint8_t *)&ctrl_reg3, 1);
+
+	if (ret == 0) {
+		ctrl_reg3.int_s = int_s;
+		ret = lps22hh_write_reg(ctx, LPS22HH_CTRL_REG3, (uint8_t *)&ctrl_reg3, 1);
+	}
+
+	return 0;
+}
+
+static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
+{
+	const struct lps22hh_config *const cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+	lps22hh_pin_int_route_t int_route;
+
+	lps22hh_autozero_set(ctx, 1);
+
+	/* set interrupt */
+	lps22hh_pin_int_route_get(ctx, &int_route);
+	int_route.drdy_pres = 1;
+	lps22hh_pin_int_route_set(ctx, &int_route);
+
+	lps22hh_int_on_threshold_set(ctx, LPS22HH_POSITIVE);
+	lps22hh_set_int_s(ctx, LPS22HH_POSITIVE);
+	lps22hh_int_threshold_set(ctx, threshold);
+
+	return 0;
+}
+
+static int lps22hh_attr_set(const struct device *dev, enum sensor_channel chan,
+			    enum sensor_attribute attr, const struct sensor_value *val)
 {
 	if (chan != SENSOR_CHAN_ALL) {
 		LOG_WRN("attr_set() not supported on this channel.");
@@ -161,6 +209,19 @@ static int lps22hh_attr_set(const struct device *dev,
 	switch (attr) {
 	case SENSOR_ATTR_SAMPLING_FREQUENCY:
 		return lps22hh_odr_set(dev, val->val1);
+
+	case SENSOR_ATTR_CONFIGURATION:
+		switch (val->val1) {
+		case LPS22HH_CMD_SET_MODE:
+			return lps22hh_mode_set(dev, val->val2);
+		case LPS22HH_CMD_SET_THRESHOLD:
+			LOG_INF("Set threshold");
+			return lps22hh_threshold_set(dev, val->val2);
+		default:
+			LOG_ERR("command not supported.");
+			return -ENOTSUP;
+		}
+
 	default:
 		LOG_DBG("operation not supported.");
 		return -ENOTSUP;
@@ -180,7 +241,7 @@ static const struct sensor_driver_api lps22hh_driver_api = {
 
 static int lps22hh_init_chip(const struct device *dev)
 {
-	const struct lps22hh_config * const cfg = dev->config;
+	const struct lps22hh_config *const cfg = dev->config;
 	struct lps22hh_data *data = dev->data;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	uint8_t chip_id;
@@ -278,64 +339,52 @@ static int lps22hh_init(const struct device *dev)
  */
 
 #ifdef CONFIG_LPS22HH_TRIGGER
-#define LPS22HH_CFG_IRQ(inst) \
-	.gpio_int = GPIO_DT_SPEC_INST_GET(inst, drdy_gpios),
+#define LPS22HH_CFG_IRQ(inst) .gpio_int = GPIO_DT_SPEC_INST_GET(inst, drdy_gpios),
 #else
 #define LPS22HH_CFG_IRQ(inst)
 #endif /* CONFIG_LPS22HH_TRIGGER */
 
-#define LPS22HH_CONFIG_COMMON(inst)					\
-	.odr = DT_INST_PROP(inst, odr),					\
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, drdy_gpios),		\
-			(LPS22HH_CFG_IRQ(inst)), ())
+#define LPS22HH_CONFIG_COMMON(inst)                                                                \
+	.odr = DT_INST_PROP(inst, odr),                                                            \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, drdy_gpios), (LPS22HH_CFG_IRQ(inst)), ())
 
-#define LPS22HH_SPI_OPERATION (SPI_WORD_SET(8) |			\
-				SPI_OP_MODE_MASTER |			\
-				SPI_MODE_CPOL |				\
-				SPI_MODE_CPHA)				\
+#define LPS22HH_SPI_OPERATION (SPI_WORD_SET(8) | SPI_OP_MODE_MASTER | SPI_MODE_CPOL | SPI_MODE_CPHA)
 
-#define LPS22HH_CONFIG_SPI(inst)					\
-	{								\
-		STMEMSC_CTX_SPI(&lps22hh_config_##inst.stmemsc_cfg),	\
-		.stmemsc_cfg = {					\
-			.spi = SPI_DT_SPEC_INST_GET(inst,		\
-					   LPS22HH_SPI_OPERATION,	\
-					   0),				\
-		},							\
-		LPS22HH_CONFIG_COMMON(inst)				\
-	}
+#define LPS22HH_CONFIG_SPI(inst)                                                                   \
+	{STMEMSC_CTX_SPI(&lps22hh_config_##inst.stmemsc_cfg),                                      \
+	 .stmemsc_cfg =                                                                            \
+		 {                                                                                 \
+			 .spi = SPI_DT_SPEC_INST_GET(inst, LPS22HH_SPI_OPERATION, 0),              \
+		 },                                                                                \
+	 LPS22HH_CONFIG_COMMON(inst)}
 
 /*
  * Instantiation macros used when a device is on an I2C bus.
  */
 
-#define LPS22HH_CONFIG_I2C(inst)					\
-	{								\
-		STMEMSC_CTX_I2C(&lps22hh_config_##inst.stmemsc_cfg),	\
-		.stmemsc_cfg = {					\
-			.i2c = I2C_DT_SPEC_INST_GET(inst),		\
-		},							\
-		LPS22HH_CONFIG_COMMON(inst)				\
-	}
+#define LPS22HH_CONFIG_I2C(inst)                                                                   \
+	{STMEMSC_CTX_I2C(&lps22hh_config_##inst.stmemsc_cfg),                                      \
+	 .stmemsc_cfg =                                                                            \
+		 {                                                                                 \
+			 .i2c = I2C_DT_SPEC_INST_GET(inst),                                        \
+		 },                                                                                \
+	 LPS22HH_CONFIG_COMMON(inst)}
 
 /*
  * Instantiation macros used when a device is on an I#C bus.
  */
 
-#define LPS22HH_CONFIG_I3C(inst)					\
-	{								\
-		STMEMSC_CTX_I3C(&lps22hh_config_##inst.stmemsc_cfg),	\
-		.stmemsc_cfg = {					\
-			.i3c = &lps22hh_data_##inst.i3c_dev,		\
-		},							\
-		.i3c.bus = DEVICE_DT_GET(DT_INST_BUS(inst)),		\
-		.i3c.dev_id = I3C_DEVICE_ID_DT_INST(inst),		\
-		LPS22HH_CONFIG_COMMON(inst)				\
-	}
+#define LPS22HH_CONFIG_I3C(inst)                                                                   \
+	{STMEMSC_CTX_I3C(&lps22hh_config_##inst.stmemsc_cfg),                                      \
+	 .stmemsc_cfg =                                                                            \
+		 {                                                                                 \
+			 .i3c = &lps22hh_data_##inst.i3c_dev,                                      \
+		 },                                                                                \
+	 .i3c.bus = DEVICE_DT_GET(DT_INST_BUS(inst)), .i3c.dev_id = I3C_DEVICE_ID_DT_INST(inst),   \
+	 LPS22HH_CONFIG_COMMON(inst)}
 
-#define LPS22HH_CONFIG_I3C_OR_I2C(inst)					\
-	COND_CODE_0(DT_INST_PROP_BY_IDX(inst, reg, 1),			\
-		    (LPS22HH_CONFIG_I2C(inst)),				\
+#define LPS22HH_CONFIG_I3C_OR_I2C(inst)                                                            \
+	COND_CODE_0(DT_INST_PROP_BY_IDX(inst, reg, 1), (LPS22HH_CONFIG_I2C(inst)),                 \
 		    (LPS22HH_CONFIG_I3C(inst)))
 
 /*
@@ -343,16 +392,14 @@ static int lps22hh_init(const struct device *dev)
  * bus-specific macro at preprocessor time.
  */
 
-#define LPS22HH_DEFINE(inst)							\
-	static struct lps22hh_data lps22hh_data_##inst;				\
-	static const struct lps22hh_config lps22hh_config_##inst =		\
-	COND_CODE_1(DT_INST_ON_BUS(inst, spi),					\
-		    (LPS22HH_CONFIG_SPI(inst)),					\
-		    (COND_CODE_1(DT_INST_ON_BUS(inst, i3c),			\
-				 (LPS22HH_CONFIG_I3C_OR_I2C(inst)),		\
-				 (LPS22HH_CONFIG_I2C(inst)))));			\
-	SENSOR_DEVICE_DT_INST_DEFINE(inst, lps22hh_init, NULL, &lps22hh_data_##inst,	\
-			      &lps22hh_config_##inst, POST_KERNEL,		\
-			      CONFIG_SENSOR_INIT_PRIORITY, &lps22hh_driver_api);
+#define LPS22HH_DEFINE(inst)                                                                       \
+	static struct lps22hh_data lps22hh_data_##inst;                                            \
+	static const struct lps22hh_config lps22hh_config_##inst = COND_CODE_1(                    \
+		DT_INST_ON_BUS(inst, spi), (LPS22HH_CONFIG_SPI(inst)),                             \
+		(COND_CODE_1(DT_INST_ON_BUS(inst, i3c), (LPS22HH_CONFIG_I3C_OR_I2C(inst)),         \
+			     (LPS22HH_CONFIG_I2C(inst)))));                                        \
+	SENSOR_DEVICE_DT_INST_DEFINE(inst, lps22hh_init, NULL, &lps22hh_data_##inst,               \
+				     &lps22hh_config_##inst, POST_KERNEL,                          \
+				     CONFIG_SENSOR_INIT_PRIORITY, &lps22hh_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(LPS22HH_DEFINE)
