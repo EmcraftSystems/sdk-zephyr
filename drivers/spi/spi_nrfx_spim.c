@@ -91,9 +91,6 @@ static inline void finalize_spi_transaction(const struct device *dev, bool deact
 	if (NRF_SPIM_IS_320MHZ_SPIM(reg) && !(dev_data->ctx.config->operation & SPI_HOLD_ON_CS)) {
 		nrfy_spim_disable(reg);
 	}
-	if (IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)) {
-		pm_device_runtime_put(dev);
-	}
 }
 
 static inline uint32_t get_nrf_spim_frequency(uint32_t frequency)
@@ -324,10 +321,9 @@ static void finish_transaction(const struct device *dev, int error)
 
 	LOG_DBG("Transaction finished with status %d", error);
 
-	spi_context_complete(ctx, dev, error);
-	dev_data->busy = false;
-
 	finalize_spi_transaction(dev, true);
+	dev_data->busy = false;
+	spi_context_complete_pm(1, ctx, dev, error);
 }
 
 static void transfer_next_chunk(const struct device *dev)
@@ -464,10 +460,8 @@ static int transceive(const struct device *dev,
 	void *reg = dev_config->spim.p_reg;
 	int error;
 
-	if (IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)) {
-		pm_device_runtime_get(dev);
-	}
-	spi_context_lock(&dev_data->ctx, asynchronous, cb, userdata, spi_cfg);
+	spi_context_lock_pm(dev, &dev_data->ctx, asynchronous,
+				cb, userdata, spi_cfg);
 
 	error = configure(dev, spi_cfg);
 	if (error == 0) {
@@ -523,7 +517,7 @@ static int transceive(const struct device *dev,
 		}
 	}
 
-	spi_context_release(&dev_data->ctx, error);
+	spi_context_release_pm(dev, &dev_data->ctx, error);
 
 	return error;
 }
@@ -561,8 +555,8 @@ static int spi_nrfx_release(const struct device *dev,
 		return -EBUSY;
 	}
 
-	spi_context_unlock_unconditionally(&dev_data->ctx);
 	finalize_spi_transaction(dev, false);
+	spi_context_unlock_unconditionally_pm(dev, &dev_data->ctx);
 
 	return 0;
 }
@@ -603,17 +597,19 @@ static int spim_nrfx_pm_action(const struct device *dev,
 		break;
 
 	case PM_DEVICE_ACTION_SUSPEND:
-		if (dev_data->initialized) {
-			nrfx_spim_uninit(&dev_config->spim);
-			dev_data->initialized = false;
-		}
+		if (IS_ENABLED(CONFIG_PM_DEVICE)) {
+			if (dev_data->initialized) {
+				nrfx_spim_uninit(&dev_config->spim);
+				dev_data->initialized = false;
+			}
 
 #ifdef CONFIG_SOC_NRF54H20_GPD
-		nrf_gpd_retain_pins_set(dev_config->pcfg, true);
+			nrf_gpd_retain_pins_set(dev_config->pcfg, true);
 #endif
 
-		ret = pinctrl_apply_state(dev_config->pcfg,
-					  PINCTRL_STATE_SLEEP);
+			ret = pinctrl_apply_state(dev_config->pcfg,
+						  PINCTRL_STATE_SLEEP);
+		}
 		break;
 
 	default:
