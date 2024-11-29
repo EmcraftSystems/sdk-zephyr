@@ -19,6 +19,11 @@ STRUCT_SECTION_END_EXTERN(cfb_font);
 #define LSB_BIT_MASK(x) BIT_MASK(x)
 #define MSB_BIT_MASK(x) (BIT_MASK(x) << (8 - x))
 
+#define DISP_NUM_PARTS (4)
+#define DISP_BUF_SIZE  (960 * 640 / 8)
+
+static uint8_t fb_buf[DISP_BUF_SIZE];
+
 static inline uint8_t byte_reverse(uint8_t b)
 {
 	b = (b & 0xf0) >> 4 | (b & 0x0f) << 4;
@@ -69,13 +74,11 @@ static struct char_framebuffer char_fb;
 
 static inline uint8_t *get_glyph_ptr(const struct cfb_font *fptr, char c)
 {
-	return (uint8_t *)fptr->data +
-	       (c - fptr->first_char) *
-	       (fptr->width * fptr->height / 8U);
+	return (uint8_t *)fptr->data + (c - fptr->first_char) * (fptr->width * fptr->height / 8U);
 }
 
-static inline uint8_t get_glyph_byte(uint8_t *glyph_ptr, const struct cfb_font *fptr,
-				     uint8_t x, uint8_t y)
+static inline uint8_t get_glyph_byte(uint8_t *glyph_ptr, const struct cfb_font *fptr, uint8_t x,
+				     uint8_t y)
 {
 	if (fptr->caps & CFB_FONT_MONO_VPACKED) {
 		return glyph_ptr[x * (fptr->height / 8U) + y];
@@ -91,8 +94,7 @@ static inline uint8_t get_glyph_byte(uint8_t *glyph_ptr, const struct cfb_font *
  * Draw the monochrome character in the monochrome tiled framebuffer,
  * a byte is interpreted as 8 pixels ordered vertically among each other.
  */
-static uint8_t draw_char_vtmono(const struct char_framebuffer *fb,
-				char c, uint16_t x, uint16_t y,
+static uint8_t draw_char_vtmono(const struct char_framebuffer *fb, char c, uint16_t x, uint16_t y,
 				bool draw_bg)
 {
 	const struct cfb_font *fptr = &(fb->fonts[fb->font_idx]);
@@ -120,7 +122,7 @@ static uint8_t draw_char_vtmono(const struct char_framebuffer *fb,
 			 */
 
 			const int16_t fb_y = y + g_y;
-			const size_t fb_index = (fb_y / 8U) * fb->x_res + fb_x;
+			const size_t fb_index = (fb->x_res / 8U) * fb_x + fb_y / 8U;
 			const size_t offset = y % 8;
 			const uint8_t bottom_lines = ((offset + fptr->height) % 8);
 			uint8_t bg_mask;
@@ -140,10 +142,10 @@ static uint8_t draw_char_vtmono(const struct char_framebuffer *fb,
 				 * So, we process assume that nothing is drawn above.
 				 */
 				byte = 0;
-				next_byte = get_glyph_byte(glyph_ptr, fptr, g_x, g_y / 8);
+				next_byte = get_glyph_byte(glyph_ptr, fptr, g_x / 8, g_y);
 			} else {
-				byte = get_glyph_byte(glyph_ptr, fptr, g_x, g_y / 8);
-				next_byte = get_glyph_byte(glyph_ptr, fptr, g_x, (g_y + 8) / 8);
+				byte = get_glyph_byte(glyph_ptr, fptr, g_x / 8U, g_y);
+				next_byte = get_glyph_byte(glyph_ptr, fptr, (g_x + 8) / 8, g_y);
 			}
 
 			if (font_is_msbfirst) {
@@ -212,8 +214,8 @@ static uint8_t draw_char_vtmono(const struct char_framebuffer *fb,
 static inline void draw_point(struct char_framebuffer *fb, int16_t x, int16_t y)
 {
 	const bool need_reverse = ((fb->screen_info & SCREEN_INFO_MONO_MSB_FIRST) != 0);
-	const size_t index = ((y / 8) * fb->x_res);
-	uint8_t m = BIT(y % 8);
+	const size_t index = ((fb->x_res / 8U) * y);
+	uint8_t m = BIT(x % 8);
 
 	if (x < 0 || x >= fb->x_res) {
 		return;
@@ -227,7 +229,7 @@ static inline void draw_point(struct char_framebuffer *fb, int16_t x, int16_t y)
 		m = byte_reverse(m);
 	}
 
-	fb->buf[index + x] |= m;
+	fb->buf[index + (x / 8U)] ^= ~m;
 }
 
 static void draw_line(struct char_framebuffer *fb, int16_t x0, int16_t y0, int16_t x1, int16_t y1)
@@ -334,8 +336,8 @@ int cfb_print(const struct device *dev, const char *const str, uint16_t x, uint1
 	return draw_text(dev, str, x, y, true);
 }
 
-int cfb_invert_area(const struct device *dev, uint16_t x, uint16_t y,
-		    uint16_t width, uint16_t height)
+int cfb_invert_area(const struct device *dev, uint16_t x, uint16_t y, uint16_t width,
+		    uint16_t height)
 {
 	const struct char_framebuffer *fb = &char_fb;
 	const bool need_reverse = ((fb->screen_info & SCREEN_INFO_MONO_MSB_FIRST) != 0);
@@ -461,29 +463,38 @@ int cfb_framebuffer_finalize(const struct device *dev)
 	const struct display_driver_api *api = dev->api;
 	const struct char_framebuffer *fb = &char_fb;
 	struct display_buffer_descriptor desc;
-	int err;
+	int err = 0;
+	bool invert = !(fb->pixel_format & PIXEL_FORMAT_MONO10) != !(fb->inverted);
 
 	if (!fb || !fb->buf) {
 		return -ENODEV;
 	}
 
-	desc.buf_size = fb->size;
+	desc.buf_size = fb->size / DISP_NUM_PARTS;
 	desc.width = fb->x_res;
-	desc.height = fb->y_res;
+	desc.height = fb->y_res / DISP_NUM_PARTS;
 	desc.pitch = fb->x_res;
 
-	if (!(fb->pixel_format & PIXEL_FORMAT_MONO10) != !(fb->inverted)) {
+	if (invert) {
 		cfb_invert(fb);
-		err = api->write(dev, 0, 0, &desc, fb->buf);
-		cfb_invert(fb);
-		return err;
 	}
 
-	return api->write(dev, 0, 0, &desc, fb->buf);
+	api->blanking_on(dev);
+
+	for (int i = 0; i < fb->y_res; i += fb->y_res / DISP_NUM_PARTS) {
+		err = api->write(dev, 0, i, &desc, &fb->buf[i * (fb->x_res / 8U)]);
+	}
+
+	api->blanking_off(dev);
+
+	if (invert) {
+		cfb_invert(fb);
+	}
+
+	return err;
 }
 
-int cfb_get_display_parameter(const struct device *dev,
-			       enum cfb_display_param param)
+int cfb_get_display_parameter(const struct device *dev, enum cfb_display_param param)
 {
 	const struct char_framebuffer *fb = &char_fb;
 
@@ -521,8 +532,7 @@ int cfb_framebuffer_set_font(const struct device *dev, uint8_t idx)
 	return 0;
 }
 
-int cfb_get_font_size(const struct device *dev, uint8_t idx, uint8_t *width,
-		      uint8_t *height)
+int cfb_get_font_size(const struct device *dev, uint8_t idx, uint8_t *width, uint8_t *height)
 {
 	const struct char_framebuffer *fb = &char_fb;
 
@@ -574,16 +584,13 @@ int cfb_framebuffer_init(const struct device *dev)
 	fb->screen_info = cfg.screen_info;
 	fb->buf = NULL;
 	fb->kerning = 0;
-	fb->inverted = false;
+	fb->inverted = true;
 
 	fb->fonts = TYPE_SECTION_START(cfb_font);
 	fb->font_idx = 0U;
 
 	fb->size = fb->x_res * fb->y_res / fb->ppt;
-	fb->buf = k_malloc(fb->size);
-	if (!fb->buf) {
-		return -ENOMEM;
-	}
+	fb->buf = (uint8_t *)fb_buf;
 
 	memset(fb->buf, 0, fb->size);
 
@@ -592,11 +599,11 @@ int cfb_framebuffer_init(const struct device *dev)
 
 void cfb_framebuffer_deinit(const struct device *dev)
 {
+}
+
+uint8_t *cfb_get_fb(void)
+{
 	struct char_framebuffer *fb = &char_fb;
 
-	if (fb->buf) {
-		k_free(fb->buf);
-		fb->buf = NULL;
-	}
-
+	return fb->buf;
 }
