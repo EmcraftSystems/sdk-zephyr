@@ -248,6 +248,13 @@ int cfb_framebuffer_init(const struct device *dev);
  */
 void cfb_framebuffer_deinit(const struct device *dev);
 
+/**
+ * @brief Get pointer to Character Framebuffer buffer
+ *
+ * @return pointer to buffer
+ */
+uint8_t *cfb_get_fb(void);
+
 #ifdef __cplusplus
 }
 #endif

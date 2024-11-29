@@ -71,3 +71,8 @@ properties:
 
       Example:
         enable-gpios = <&gpio5 2 GPIO_ACTIVE_HIGH>;
+
+  no-readback:
+    type: boolean
+    description: |
+      GPIO does not support reading back output value.
