@@ -158,7 +158,8 @@ static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	lps22hh_pin_int_route_t int_route;
 
-	lps22hh_autozero_set(ctx, 1);
+	lps22hh_autozero_set(ctx, 0);
+	lps22hh_autozero_rst_set(ctx, 1);
 
 	/* set interrupt */
 	lps22hh_pin_int_route_get(ctx, &int_route);
