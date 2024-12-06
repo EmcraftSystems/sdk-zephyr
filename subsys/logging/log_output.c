@@ -555,14 +555,17 @@ void log_output_msg_process(const struct log_output *output,
 	uint8_t level = log_msg_get_level(msg);
 	uint8_t domain_id = log_msg_get_domain(msg);
 	int16_t source_id = log_msg_get_source_id(msg);
+	int domain_cnt = log_domains_count();
 
 	const char *sname = source_id >= 0 ? log_source_name_get(domain_id, source_id) : NULL;
 	size_t plen, dlen;
 	uint8_t *package = log_msg_get_package(msg, &plen);
 	uint8_t *data = log_msg_get_data(msg, &dlen);
 
-	log_output_process(output, timestamp, NULL, sname, (k_tid_t)log_msg_get_tid(msg), level,
-			   plen > 0 ? package : NULL, data, dlen, flags);
+	log_output_process(output, timestamp, domain_cnt > 1 ?
+			log_domain_name_get(domain_id) : NULL, sname,
+			(k_tid_t)log_msg_get_tid(msg), level,
+			plen > 0 ? package : NULL, data, dlen, flags);
 }
 
 void log_output_dropped_process(const struct log_output *output, uint32_t cnt)
