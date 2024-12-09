@@ -197,7 +197,8 @@ struct tcp_mss_option {
 };
 
 enum tcp_state {
-	TCP_LISTEN = 1,
+	TCP_UNUSED = 0,
+	TCP_LISTEN,
 	TCP_SYN_SENT,
 	TCP_SYN_RECEIVED,
 	TCP_ESTABLISHED,
@@ -274,6 +275,7 @@ struct tcp { /* TCP connection */
 	struct k_work_delayable timewait_timer;
 	struct k_work_delayable persist_timer;
 	struct k_work_delayable ack_timer;
+	struct k_work conn_release;
 
 	union {
 		/* Because FIN and establish timers are never happening
