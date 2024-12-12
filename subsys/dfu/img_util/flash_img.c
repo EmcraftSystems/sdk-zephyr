@@ -18,6 +18,14 @@
 #include <zephyr/dfu/mcuboot.h>
 #endif
 
+//#if USE_PARTITION_MANAGER
+#if 1
+#include <pm_config.h>
+
+#define UPLOAD_FLASH_AREA_ID PM_MCUBOOT_SECONDARY_ID
+
+#else /* !USE_PARTITION_MANAGER */
+
 #include <zephyr/devicetree.h>
 #ifdef CONFIG_TRUSTED_EXECUTION_NONSECURE
 	#define UPLOAD_FLASH_AREA_LABEL slot1_ns_partition
@@ -42,6 +50,8 @@ BUILD_ASSERT((CONFIG_IMG_BLOCK_BUF_SIZE % FLASH_WRITE_BLOCK_SIZE == 0),
 	     "CONFIG_IMG_BLOCK_BUF_SIZE is not a multiple of "
 	     "FLASH_WRITE_BLOCK_SIZE");
 #endif
+
+#endif /* USE_PARTITION_MANAGER */
 
 static int scramble_mcuboot_trailer(struct flash_img_context *ctx)
 {
