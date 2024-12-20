@@ -296,13 +296,13 @@ static uint32_t z_log_init(bool blocking, bool can_sleep)
 		return 0;
 	}
 
-	int i = 0;
 	if (IS_ENABLED(CONFIG_LOG_MULTIDOMAIN)) {
 		z_log_links_initiate();
 	}
 
+	int backend_index = 0;
 
-	/* Assign ids to backends. */
+	/* Activate autostart backends */
 	STRUCT_SECTION_FOREACH(log_backend, backend) {
 		if (backend->autostart) {
 			log_backend_init(backend);
@@ -315,11 +315,11 @@ static uint32_t z_log_init(bool blocking, bool can_sleep)
 						   backend->cb->ctx,
 						   CONFIG_LOG_MAX_LEVEL);
 			} else {
-				mask |= BIT(i);
+				mask |= BIT(backend_index);
 			}
-
-			i++;
 		}
+
+		++backend_index;
 	}
 
 	/* If blocking init, wait until all backends are activated. */
@@ -579,6 +579,11 @@ void z_log_dropped(bool buffered)
 	atomic_inc(&dropped_cnt);
 	if (buffered) {
 		atomic_dec(&buffered_cnt);
+	}
+
+	if (IS_ENABLED(CONFIG_LOG_PROCESS_THREAD)) {
+		k_timer_stop(&log_process_thread_timer);
+		k_sem_give(&log_process_thread_sem);
 	}
 }
 
