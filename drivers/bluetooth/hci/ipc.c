@@ -311,6 +311,7 @@ static int bt_ipc_open(const struct device *dev, bt_hci_recv_t recv)
 {
 	struct ipc_data *ipc = dev->data;
 	int err;
+	int cnt = 3;
 
 	err = bt_hci_transport_setup(NULL);
 	if (err) {
@@ -332,10 +333,15 @@ static int bt_ipc_open(const struct device *dev, bt_hci_recv_t recv)
 		return err;
 	}
 
-	err = k_sem_take(&ipc->bound_sem, IPC_BOUND_TIMEOUT_IN_MS);
-	if (err) {
-		LOG_ERR("Endpoint binding failed with %d", err);
-		return err;
+	while (--cnt) {
+		err = k_sem_take(&ipc->bound_sem, IPC_BOUND_TIMEOUT_IN_MS);
+		if (err == 0) {
+			break;
+		}
+		if (err && err != -EAGAIN) {
+			LOG_ERR("Endpoint binding failed with %d", err);
+			return err;
+		}
 	}
 
 	ipc->recv = recv;
