@@ -346,7 +346,7 @@ static int bt_ipc_open(const struct device *dev, bt_hci_recv_t recv)
 
 	ipc->recv = recv;
 
-	return 0;
+	return err;
 }
 
 static int bt_ipc_close(const struct device *dev)
