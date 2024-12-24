@@ -541,6 +541,10 @@ int npm1300_charger_init(const struct device *dev)
 	if (ret != 0) {
 		return ret;
 	}
+	ret = mfd_npm1300_reg_write(config->mfd, VBUS_BASE, VBUS_OFFSET_ILIM, idx);
+	if (ret != 0) {
+		return ret;
+	}
 
 	/* Configure trickle voltage threshold */
 	ret = mfd_npm1300_reg_write(config->mfd, CHGR_BASE, CHGR_OFFSET_TRICKLE_SEL,
