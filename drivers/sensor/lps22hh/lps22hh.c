@@ -161,6 +161,8 @@ static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
 	lps22hh_autozero_set(ctx, 0);
 	lps22hh_autozero_rst_set(ctx, 1);
 
+	lps22hh_pressure_snap_set(ctx, 1);
+
 	/* set interrupt */
 	lps22hh_pin_int_route_get(ctx, &int_route);
 	int_route.drdy_pres = 1;
