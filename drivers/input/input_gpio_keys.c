@@ -205,6 +205,12 @@ static int gpio_keys_init(const struct device *dev)
 		return ret;
 	}
 
+	ret = pm_device_runtime_get(dev);
+	if (ret < 0) {
+		LOG_ERR("Failed to resume device");
+		return ret;
+	}
+
 	return 0;
 }
 
