@@ -79,7 +79,9 @@ struct configs {
 
 static struct configs smp_udp_configs;
 
+#ifdef CONFIG_MCUMGR_TRANSPORT_UDP_AUTOMATIC_INIT
 static struct net_mgmt_event_callback smp_udp_mgmt_cb;
+#endif
 
 static const char *smp_udp_proto_to_name(enum proto_type proto)
 {
@@ -102,7 +104,19 @@ static const char *smp_udp_proto_to_name(enum proto_type proto)
 static int smp_udp4_tx(struct net_buf *nb)
 {
 	int ret;
-	struct sockaddr *addr = net_buf_user_data(nb);
+	struct sockaddr *addr;
+#ifdef CONFIG_MCUMGR_TRANSPORT_UDP_IPV4_PEER_ADDR
+	struct sockaddr_in paddr = {
+		.sin_family = AF_INET,
+		.sin_port = htons(CONFIG_MCUMGR_TRANSPORT_UDP_PORT),
+	};
+
+	inet_pton(AF_INET, CONFIG_MCUMGR_TRANSPORT_UDP_IPV4_PEER_ADDR,
+			(void *)&paddr.sin_addr);
+	addr = (struct sockaddr *)&paddr;
+#else
+	addr = net_buf_user_data(nb);
+#endif
 
 	ret = zsock_sendto(smp_udp_configs.ipv4.sock, nb->data, nb->len, 0, addr, sizeof(*addr));
 
@@ -179,7 +193,12 @@ static int create_socket(enum proto_type proto, int *sock)
 		memset(addr4, 0, sizeof(*addr4));
 		addr4->sin_family = AF_INET;
 		addr4->sin_port = htons(CONFIG_MCUMGR_TRANSPORT_UDP_PORT);
+#ifdef CONFIG_MCUMGR_TRANSPORT_UDP_IPV4_BIND_ADDR
+		inet_pton(AF_INET, CONFIG_MCUMGR_TRANSPORT_UDP_IPV4_BIND_ADDR,
+				&addr4->sin_addr);
+#else
 		addr4->sin_addr.s_addr = htonl(INADDR_ANY);
+#endif
 	} else if (IS_ENABLED(CONFIG_MCUMGR_TRANSPORT_UDP_IPV6) &&
 		   proto == PROTOCOL_IPV6) {
 		struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)addr;
@@ -191,7 +210,8 @@ static int create_socket(enum proto_type proto, int *sock)
 		addr6->sin6_addr = in6addr_any;
 	}
 
-	tmp_sock = zsock_socket(addr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+	tmp_sock = zsock_socket(addr->sa_family, SOCK_DGRAM | SOCK_NATIVE,
+			IPPROTO_UDP);
 	err = errno;
 
 	if (tmp_sock < 0) {
@@ -284,6 +304,7 @@ static void smp_udp_open_iface(struct net_if *iface, void *user_data)
 	}
 }
 
+#ifdef CONFIG_MCUMGR_TRANSPORT_UDP_AUTOMATIC_INIT
 static void smp_udp_net_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event,
 				      struct net_if *iface)
 {
@@ -293,6 +314,7 @@ static void smp_udp_net_event_handler(struct net_mgmt_event_callback *cb, uint32
 		smp_udp_open_iface(iface, NULL);
 	}
 }
+#endif
 
 static void create_thread(struct config *conf, const char *name)
 {
@@ -305,7 +327,7 @@ static void create_thread(struct config *conf, const char *name)
 	k_thread_start(&(conf->thread));
 }
 
-int smp_udp_open(void)
+int smp_udp_open(struct net_if *iface)
 {
 	bool started = false;
 
@@ -330,8 +352,15 @@ int smp_udp_open(void)
 #endif
 
 	if (started) {
-		/* One or more threads were started, check existing interfaces */
-		net_if_foreach(smp_udp_open_iface, NULL);
+		if (!iface) {
+			/*
+			 * One or more threads were started, check existing
+			 * interfaces
+			 */
+			net_if_foreach(smp_udp_open_iface, NULL);
+		} else {
+			smp_udp_open_iface(iface, NULL);
+		}
 	}
 
 	return 0;
@@ -417,11 +446,11 @@ static void smp_udp_start(void)
 	}
 #endif
 
+#ifdef CONFIG_MCUMGR_TRANSPORT_UDP_AUTOMATIC_INIT
 	net_mgmt_init_event_callback(&smp_udp_mgmt_cb, smp_udp_net_event_handler, NET_EVENT_IF_UP);
 	net_mgmt_add_event_callback(&smp_udp_mgmt_cb);
 
-#ifdef CONFIG_MCUMGR_TRANSPORT_UDP_AUTOMATIC_INIT
-	smp_udp_open();
+	smp_udp_open(NULL);
 #endif
 }
 

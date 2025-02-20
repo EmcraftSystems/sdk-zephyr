@@ -26,7 +26,7 @@ extern "C" {
  * @return	0 on success
  * @return	-errno code on failure.
  */
-int smp_udp_open(void);
+int smp_udp_open(struct net_if *iface);
 
 /**
  * @brief	Disables the UDP SMP MCUmgr transport thread(s) which will close open sockets.
