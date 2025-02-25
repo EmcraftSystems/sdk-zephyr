@@ -41,6 +41,12 @@ config MCUMGR_TRANSPORT_UDP_PORT
 	help
 	  UDP port that SMP server will listen for SMP commands on.
 
+config MCUMGR_TRANSPORT_UDP_IPV4_BIND_ADDR
+	string "UDP SMP IPV4 bind address"
+
+config MCUMGR_TRANSPORT_UDP_IPV4_PEER_ADDR
+	string "PPP IPV4 address"
+
 config MCUMGR_TRANSPORT_UDP_STACK_SIZE
 	int "UDP SMP stack size"
 	default 512
