@@ -183,18 +183,62 @@ static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
 	const struct lps22hh_config *const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	lps22hh_pin_int_route_t int_route;
+	int32_t ret;
 
-	lps22hh_autozero_set(ctx, 0);
-	lps22hh_autozero_rst_set(ctx, 1);
+	/* Enable AUTOREFP */
+	ret = lps22hh_pressure_snap_set(ctx, 1);
+	if (ret != 0) {
+		LOG_ERR("Can't set AUTOREFP");
+	}
+
+	/* Enable DIFF_EN, PLE, PHE */
+	ret = lps22hh_int_on_threshold_set(ctx, LPS22HH_BOTH);
+	if (ret != 0) {
+		LOG_ERR("Can't set DIFF_EN");
+	}
+
+	/* set threshold */
+	ret = lps22hh_int_threshold_set(ctx, threshold);
+	if (ret != 0) {
+		LOG_ERR("Can't set threshold");
+	}
 
 	/* set interrupt */
 	lps22hh_pin_int_route_get(ctx, &int_route);
-	int_route.drdy_pres = 1;
+	int_route.drdy_pres = 0;
 	lps22hh_pin_int_route_set(ctx, &int_route);
 
-	lps22hh_int_on_threshold_set(ctx, LPS22HH_POSITIVE);
-	lps22hh_set_int_s(ctx, LPS22HH_POSITIVE);
-	lps22hh_int_threshold_set(ctx, threshold);
+	ret = lps22hh_set_int_s(ctx, LPS22HH_BOTH);
+	if (ret != 0) {
+		LOG_ERR("Can't set interrupt source");
+	}
+
+	return 0;
+}
+
+static int lps22hh_threshold_unset(const struct device *dev)
+{
+	const struct lps22hh_config *const cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+	lps22hh_pin_int_route_t int_route;
+	int32_t ret;
+
+	/* Unset AUTOREFP */
+	ret = lps22hh_pressure_snap_set(ctx, 0);
+	if (ret != 0) {
+		LOG_ERR("Cannot unset AUTOREFP");
+	}
+
+	/* Unset threshold and diff_en */
+	ret = lps22hh_int_on_threshold_set(ctx, LPS22HH_NO_THRESHOLD);
+	if (ret != 0) {
+		LOG_ERR("Can't set DIFF_EN");
+	}
+
+	ret = lps22hh_set_int_s(ctx, LPS22HH_NO_THRESHOLD);
+	if (ret != 0) {
+		LOG_ERR("Can't set interrupt source");
+	}
 
 	return 0;
 }
@@ -218,6 +262,9 @@ static int lps22hh_attr_set(const struct device *dev, enum sensor_channel chan,
 		case LPS22HH_CMD_SET_THRESHOLD:
 			LOG_INF("Set threshold");
 			return lps22hh_threshold_set(dev, val->val2);
+		case LPS22HH_CMD_UNSET_THRESHOLD:
+			LOG_INF("Unset threshold");
+			return lps22hh_threshold_unset(dev);
 		default:
 			LOG_ERR("command not supported.");
 			return -ENOTSUP;
@@ -297,6 +344,9 @@ static int lps22hh_init_chip(const struct device *dev)
 #else
 	ARG_UNUSED(data);
 #endif
+
+	/* reset registers */
+	lps22hh_reset_set(ctx, 1);
 
 	/* set sensor default odr */
 	LOG_DBG("%s: odr: %d", dev->name, cfg->odr);
