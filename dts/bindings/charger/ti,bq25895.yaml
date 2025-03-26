@@ -1,0 +1,51 @@
+#
+# SPDX-License-Identifier: Apache-2.0
+
+description: BQ25895 driver on I2C bus
+
+compatible: "ti,bq25895"
+
+include: ["i2c-device.yaml", "battery.yaml"]
+
+properties:
+
+  irq-gpios:
+    type: phandle-array
+    required: true
+    description: Open drain IRQ pin (active low)
+
+  ce-gpios:
+    type: phandle-array
+    description: Charge enable pin (active low)
+
+  inlim:
+    type: int
+    description: Input current limit (mA)
+
+  vindpm_os:
+    type: int
+    description: Input voltage limit offset (mV)
+
+  vsysmin:
+    type: int
+    description: Minimum system voltage (mV)
+
+  batcomp:
+    type: int
+    description: IR compensation resistor (mOhm)
+
+  vclamp:
+    type: int
+    description: IR compensation voltage clamp (mV)
+
+  treg:
+    type: int
+    description: Termal regulation threshold (C)
+
+  boostv:
+    type: int
+    description: Boost mode voltage regulation (mV)
+
+  vindpm:
+    type: int
+    description: Absolute VINDPM threshold, disables relative setting (mV)
