@@ -195,6 +195,7 @@ int lps22hh_init_interrupt(const struct device *dev)
 		       lps22hh_thread, lps22hh,
 		       NULL, NULL, K_PRIO_COOP(CONFIG_LPS22HH_THREAD_PRIORITY),
 		       0, K_NO_WAIT);
+	k_thread_name_set(&lps22hh->thread, "lps22hh");
 #elif defined(CONFIG_LPS22HH_TRIGGER_GLOBAL_THREAD)
 	lps22hh->work.handler = lps22hh_work_cb;
 #endif /* CONFIG_LPS22HH_TRIGGER_OWN_THREAD */
