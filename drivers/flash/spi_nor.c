@@ -1512,8 +1512,6 @@ static int spi_nor_pm_control(const struct device *dev, enum pm_device_action ac
  */
 static int spi_nor_init(const struct device *dev)
 {
-	k_sleep(K_MSEC(CONFIG_SPI_NOR_INIT_DELAY));
-
 	if (IS_ENABLED(CONFIG_MULTITHREADING)) {
 		struct spi_nor_data *const driver_data = dev->data;
 

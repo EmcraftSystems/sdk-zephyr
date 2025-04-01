@@ -89,10 +89,4 @@ config SPI_NOR_ACTIVE_DWELL_MS
 	  call, eliminating the active->idle->active transition sequence if another
 	  transaction occurs before the dwell period expires.
 
-config SPI_NOR_INIT_DELAY
-	int "Delay in milliseconds before SPI NOR Flash initialization"
-	default 0
-	help
-	  The delay is required on some boards for the Flash to get power
-
 endif # SPI_NOR
