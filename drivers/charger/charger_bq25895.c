@@ -644,7 +644,7 @@ static int bq25895_init(const struct device *dev)
 		LOCAL_INST_PROP_INIT(inst, vsysmin, vsysmin),                                      \
 		LOCAL_INST_PROP_INIT(inst, ichg, constant_charge_current_max_microamp),            \
 		LOCAL_INST_PROP_INIT(inst, iprechg, precharge_current_microamp),                   \
-		LOCAL_INST_PROP_INIT(inst, iterm, charge_term + current_microamp),                 \
+		LOCAL_INST_PROP_INIT(inst, iterm, charge_term_current_microamp),                   \
 		LOCAL_INST_PROP_INIT(inst, vreg, constant_charge_voltage_max_microvolt),           \
 		LOCAL_INST_PROP_INIT(inst, bat_comp, batcomp),                                     \
 		LOCAL_INST_PROP_INIT(inst, vclamp, vclamp),                                        \
