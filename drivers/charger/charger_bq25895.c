@@ -582,19 +582,19 @@ static int bq25895_init(const struct device *dev)
 	if (ret < 0) {
 		return ret;
 	}
-	ret = set_parameter(ichg, 0, 5056, 0, 64, 7, 0, BQ25895_ICHG_CTL);
+	ret = set_parameter(ichg, 0, 5056000, 0, 64000, 7, 0, BQ25895_ICHG_CTL);
 	if (ret < 0) {
 		return ret;
 	}
-	ret = set_parameter(iprechg, 64, 1024, 64, 64, 4, 4, BQ25895_ITERM_CTL);
+	ret = set_parameter(iprechg, 64000, 1024000, 64000, 64000, 4, 4, BQ25895_ITERM_CTL);
 	if (ret < 0) {
 		return ret;
 	}
-	ret = set_parameter(iterm, 64, 1024, 64, 64, 4, 0, BQ25895_ITERM_CTL);
+	ret = set_parameter(iterm, 64000, 1024000, 64000, 64000, 4, 0, BQ25895_ITERM_CTL);
 	if (ret < 0) {
 		return ret;
 	}
-	ret = set_parameter(vreg, 3840, 4608, 3840, 16, 6, 2, BQ25895_VREG_CTL);
+	ret = set_parameter(vreg, 3840000, 4608000, 3840000, 16000, 6, 2, BQ25895_VREG_CTL);
 	if (ret < 0) {
 		return ret;
 	}
