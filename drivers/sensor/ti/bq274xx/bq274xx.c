@@ -449,23 +449,23 @@ static int bq274xx_gauge_configure(const struct device *dev)
 		if (ret < 0) {
 			return ret;
 		}
+	}
 
-		if (data->regs == &bq27427_regs) {
-			ret = bq27427_ccgain_quirk(dev);
-			if (ret < 0) {
-				return ret;
-			}
-		}
-
-		ret = bq274xx_ensure_chemistry(dev);
+	if (data->regs == &bq27427_regs) {
+		ret = bq27427_ccgain_quirk(dev);
 		if (ret < 0) {
 			return ret;
 		}
+	}
 
-		ret = bq274xx_mode_cfgupdate(dev, false);
-		if (ret < 0) {
-			return ret;
-		}
+	ret = bq274xx_ensure_chemistry(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = bq274xx_mode_cfgupdate(dev, false);
+	if (ret < 0) {
+		return ret;
 	}
 
 	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SEALED);
