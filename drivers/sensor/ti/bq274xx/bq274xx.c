@@ -349,7 +349,7 @@ static int bq274xx_ensure_chemistry(const struct device *dev)
 		return -EIO;
 	}
 
-	LOG_DBG("Chem ID: %04x", val);
+	LOG_DBG("Current Chem ID: %04x", val);
 
 	if (val != chem_id) {
 		/* Only the bq27427 has a configurable Chemistry ID. On bq27421, it depends on the
@@ -363,7 +363,7 @@ static int bq274xx_ensure_chemistry(const struct device *dev)
 
 		uint16_t cmd;
 
-		switch (val) {
+		switch (chem_id) {
 		case BQ27427_CHEM_ID_A:
 			cmd = BQ27427_CTRL_CHEM_A;
 			break;
@@ -383,6 +383,7 @@ static int bq274xx_ensure_chemistry(const struct device *dev)
 			LOG_ERR("Unable to configure chemistry");
 			return -EIO;
 		}
+		LOG_DBG("Set Chem ID: %04x", val);
 	}
 	return 0;
 }
@@ -448,23 +449,23 @@ static int bq274xx_gauge_configure(const struct device *dev)
 		if (ret < 0) {
 			return ret;
 		}
+	}
 
-		if (data->regs == &bq27427_regs) {
-			ret = bq27427_ccgain_quirk(dev);
-			if (ret < 0) {
-				return ret;
-			}
-		}
-
-		ret = bq274xx_ensure_chemistry(dev);
+	if (data->regs == &bq27427_regs) {
+		ret = bq27427_ccgain_quirk(dev);
 		if (ret < 0) {
 			return ret;
 		}
+	}
 
-		ret = bq274xx_mode_cfgupdate(dev, false);
-		if (ret < 0) {
-			return ret;
-		}
+	ret = bq274xx_ensure_chemistry(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = bq274xx_mode_cfgupdate(dev, false);
+	if (ret < 0) {
+		return ret;
 	}
 
 	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SEALED);
