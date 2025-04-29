@@ -327,6 +327,34 @@ img_mgmt_find_by_hash(uint8_t *find, struct image_version *ver)
 }
 
 /*
+ * Finds image given hash of the image.
+ * Starts searching from the specified slot.
+ * Returns the slot number image is in, or -1 if not found.
+ */
+int img_mgmt_find_by_hash_next(uint8_t *find, struct image_version *ver, int slot)
+{
+	int i;
+	bool skip = (slot >= 0);
+	uint8_t hash[IMAGE_SHA_LEN];
+
+	for (i = 0; i < 2 * CONFIG_MCUMGR_GRP_IMG_UPDATABLE_IMAGE_NUMBER; i++) {
+		if (img_mgmt_read_info(i, ver, hash, NULL) != 0) {
+			continue;
+		}
+		if (!memcmp(hash, find, IMAGE_SHA_LEN)) {
+			if (skip) {
+				if (i == slot) {
+					skip = false;
+				}
+				continue;
+			}
+			return i;
+		}
+	}
+	return -1;
+}
+
+/*
  * Resets upload status to defaults (no upload in progress)
  */
 #ifdef CONFIG_MCUMGR_GRP_IMG_MUTEX

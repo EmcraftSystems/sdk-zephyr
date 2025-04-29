@@ -719,6 +719,12 @@ img_mgmt_state_write(struct smp_streamer *ctxt)
 					     IMG_MGMT_ERR_INVALID_HASH);
 			goto end;
 		}
+
+		rc = img_mgmt_set_next_boot_slot(slot, confirm);
+		if (rc != 0) {
+			ok = smp_add_cmd_err(zse, MGMT_GROUP_ID_IMAGE, rc);
+			goto end;
+		}
 	} else if (zhash.len != IMAGE_SHA_LEN) {
 		/* The img_mgmt_find_by_hash does exact length compare
 		 * so just fail here.
@@ -730,18 +736,29 @@ img_mgmt_state_write(struct smp_streamer *ctxt)
 
 		memcpy(hash, zhash.value, zhash.len);
 
-		slot = img_mgmt_find_by_hash(hash, NULL);
-		if (slot < 0) {
+		slot = -1;
+		rc = -1;
+		do {
+			slot = img_mgmt_find_by_hash_next(hash, NULL, slot);
+			if (slot < 0) {
+				break;
+			}
+			rc = img_mgmt_set_next_boot_slot(slot, confirm);
+			if (rc) {
+			}
+		} while (rc);
+
+		if (rc > 0) {
+			ok = smp_add_cmd_err(zse, MGMT_GROUP_ID_IMAGE, rc);
+			goto end;
+		} else if (slot < 0) {
 			ok = smp_add_cmd_err(zse, MGMT_GROUP_ID_IMAGE,
 					     IMG_MGMT_ERR_HASH_NOT_FOUND);
 			goto end;
+		} else if (rc < 0) {
+			ok = smp_add_cmd_err(zse, MGMT_GROUP_ID_IMAGE, rc);
+			goto end;
 		}
-	}
-
-	rc = img_mgmt_set_next_boot_slot(slot, confirm);
-	if (rc != 0) {
-		ok = smp_add_cmd_err(zse, MGMT_GROUP_ID_IMAGE, rc);
-		goto end;
 	}
 
 	/* Send the current image state in the response. */
