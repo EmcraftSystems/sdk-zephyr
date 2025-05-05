@@ -192,8 +192,10 @@ static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
 			break;
 		}
 
-		shell_print(sh, "%s%s", entry.name,
-			      (entry.type == FS_DIR_ENTRY_DIR) ? "/" : "");
+		shell_print(sh, "%s %10d\t%s%s",
+				(entry.type == FS_DIR_ENTRY_DIR) ? "d" : "-",
+				entry.size, entry.name,
+				(entry.type == FS_DIR_ENTRY_DIR) ? "/" : "");
 	}
 
 	fs_closedir(&dir);
