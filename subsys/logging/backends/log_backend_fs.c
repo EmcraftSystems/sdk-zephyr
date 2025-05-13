@@ -18,6 +18,23 @@
 #define MAX_FILE_NUMERAL 9999
 #define FILE_NUMERAL_LEN 4
 
+#define THREAD_PRIORITY (K_LOWEST_APPLICATION_THREAD_PRIO - 1)
+
+struct logfs_msg {
+	uint8_t buf[MAX_FLASH_WRITE_SIZE];
+	uint32_t len;
+};
+
+#define MSG_SIZE 4
+
+K_MSGQ_DEFINE(log_msgq, sizeof(struct logfs_msg), MSG_SIZE, 1);
+
+#define LOG_BACKEND_FS_STACK_SIZE	2048
+
+K_THREAD_STACK_DEFINE(logfs_queue_stack_area, LOG_BACKEND_FS_STACK_SIZE);
+static struct k_work_q logfs_queue_work_q;
+static struct k_work logfs_msg_work;
+
 enum backend_fs_state {
 	BACKEND_FS_NOT_INITIALIZED = 0,
 	BACKEND_FS_CORRUPTED,
@@ -210,12 +227,6 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 			}
 			length = 0;
 		}
-
-		rc = fs_sync(f);
-		if (rc < 0) {
-			/* Something is wrong */
-			goto on_error;
-		}
 	}
 
 	return length;
@@ -223,6 +234,47 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 on_error:
 	backend_state = BACKEND_FS_CORRUPTED;
 	return length;
+}
+
+static int logfs_producer(uint8_t *data, size_t length, void *ctx)
+{
+	struct logfs_msg msg;
+	int ret;
+
+	memcpy(msg.buf, data, length);
+	msg.len = length;
+
+	ret = k_msgq_put(&log_msgq, &msg, K_NO_WAIT);
+	if (ret) {
+		/* msgq is full */
+		return 0;
+	}
+
+	ret = k_work_submit_to_queue(&logfs_queue_work_q, &logfs_msg_work);
+	if (ret < 0) {
+		return 0;
+	}
+
+	return length;
+}
+
+static void logfs_consumer(struct k_work *work)
+{
+	struct logfs_msg msg;
+	int rc;
+
+	while (k_msgq_get(&log_msgq, &msg, K_NO_WAIT) == 0) {
+
+		/* call the actual fs write routine */
+		write_log_to_file(&msg.buf, msg.len, NULL);
+	}
+
+	/* sync changes to fs */
+	rc = fs_sync(&fs_file);
+
+	if (rc < 0) {
+		backend_state = BACKEND_FS_CORRUPTED;
+	}
 }
 
 static int get_log_file_id(struct fs_dirent *ent)
@@ -453,10 +505,30 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_LOG_MODE_IMMEDIATE),
 #ifndef CONFIG_LOG_BACKEND_FS_TESTSUITE
 
 static uint8_t __aligned(4) buf[MAX_FLASH_WRITE_SIZE];
-LOG_OUTPUT_DEFINE(log_output, write_log_to_file, buf, MAX_FLASH_WRITE_SIZE);
+LOG_OUTPUT_DEFINE(log_output, logfs_producer, buf, MAX_FLASH_WRITE_SIZE);
 
 static void log_backend_fs_init(const struct log_backend *const backend)
 {
+	int rc;
+	struct k_work_queue_config cfg = { .name = "log_fs", };
+
+	k_work_queue_init(&logfs_queue_work_q);
+	k_work_queue_start(&logfs_queue_work_q, logfs_queue_stack_area,
+			K_THREAD_STACK_SIZEOF(logfs_queue_stack_area),
+			THREAD_PRIORITY, &cfg);
+	k_work_init(&logfs_msg_work, logfs_consumer);
+
+	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
+		if (check_log_volume_available()) {
+			/* will try to re-init later */
+			return;
+		}
+		rc = create_log_dir(CONFIG_LOG_BACKEND_FS_DIR);
+		if (!rc) {
+			rc = allocate_new_file(&fs_file);
+		}
+		backend_state = (rc ? BACKEND_FS_CORRUPTED : BACKEND_FS_OK);
+	}
 }
 
 static void panic(struct log_backend const *const backend)
@@ -504,4 +576,9 @@ static const struct log_backend_api log_backend_fs_api = {
 
 LOG_BACKEND_DEFINE(log_backend_fs, log_backend_fs_api,
 		   IS_ENABLED(CONFIG_LOG_BACKEND_FS_AUTOSTART));
+
+const struct log_backend *log_backend_fs_get(void)
+{
+	return &log_backend_fs;
+}
 #endif
