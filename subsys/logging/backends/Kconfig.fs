@@ -66,4 +66,10 @@ config LOG_BACKEND_FS_FILES_LIMIT
 	  Limit of number of files with logs. It is also limited by
 	  size of file system partition.
 
+config LOG_BACKEND_FS_STACK_SIZE
+	int "Backend work queue stack size"
+	default 3072
+	help
+	  Set stack size for the work queue writing to FS
+
 endif # LOG_BACKEND_FS

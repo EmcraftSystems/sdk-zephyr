@@ -28,10 +28,7 @@ struct logfs_msg {
 #define MSG_SIZE 4
 
 K_MSGQ_DEFINE(log_msgq, sizeof(struct logfs_msg), MSG_SIZE, 1);
-
-#define LOG_BACKEND_FS_STACK_SIZE	2048
-
-K_THREAD_STACK_DEFINE(logfs_queue_stack_area, LOG_BACKEND_FS_STACK_SIZE);
+K_THREAD_STACK_DEFINE(logfs_queue_stack_area, CONFIG_LOG_BACKEND_FS_STACK_SIZE);
 static struct k_work_q logfs_queue_work_q;
 static struct k_work logfs_msg_work;
 
