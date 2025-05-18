@@ -72,4 +72,21 @@ config LOG_BACKEND_FS_STACK_SIZE
 	help
 	  Set stack size for the work queue writing to FS
 
+config LOG_BACKEND_FS_TIME_BASED_ROTATION
+	bool "Time based log rotation"
+	default y
+	help
+	  When enabled, log rotation is done based on time and file size.
+	  When disabled, log rotation is done based on file size.
+
+if LOG_BACKEND_FS_TIME_BASED_ROTATION
+
+config LOG_BACKEND_FS_TIME_BASED_ROTATION_INTERVAL
+	int "Time based log rotation interval"
+	default 72
+	help
+	  Time interval in hours for log rotation.
+
+endif # LOG_BACKEND_FS_TIME_BASED_ROTATION
+
 endif # LOG_BACKEND_FS
