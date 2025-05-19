@@ -114,6 +114,60 @@ static void create_abs_path(const char *name, char *path, size_t len)
 	}
 }
 
+/**
+ * @brief Wildcard matching function
+ *
+ * This function implements a simple wildcard matching algorithm.
+ * It supports the '*' wildcard for any sequence of characters
+ * and the '?' wildcard for any single character.
+ *
+ * @param str The string to match
+ * @param pattern The pattern to match against
+ * @return true if the string matches the pattern, false otherwise
+ */
+static bool wildcard_match(const char *str, const char *pattern)
+{
+	while (*pattern) {
+		if (*pattern == '*') {
+			pattern++;
+			/**
+			 * If the current character is a '*', we need to check if the
+			 * remaining part of the string matches the pattern.
+			 * We do this by recursively calling the wildcard_match function
+			 * with the remaining part of the string and the pattern.
+			 */
+			while (*str) {
+				if (wildcard_match(str, pattern)) {
+					return true;
+				}
+				str++;
+			}
+		} else if (*pattern == '?') {
+			/**
+			 * If the current character is a '?' and we didn't reach the end of the
+			 * string, we can move to the next character in the string and the pattern.
+			 */
+			if (*str == '\0') {
+				return false;
+			}
+			str++;
+			pattern++;
+		} else {
+			/**
+			 * Not a wildcard, compare current characters
+			 */
+			if (*str != *pattern) {
+				return false;
+			}
+			str++;
+			pattern++;
+		}
+	}
+
+	/* If end of both string and pattern is reached, it's match */
+	return (*str == '\0' && *pattern == '\0');
+}
+
 static int cmd_cd(const struct shell *sh, size_t argc, char **argv)
 {
 	char path[MAX_PATH_LEN];
@@ -263,9 +317,69 @@ static int cmd_rm(const struct shell *sh, size_t argc, char **argv)
 {
 	int err;
 	char path[MAX_PATH_LEN];
+	struct fs_dir_t dir;
+	struct fs_dirent entry;
+	char *dir_path;
+	char *file_pattern;
 
 	create_abs_path(argv[1], path, sizeof(path));
 
+	/* Check if path contains wildcard characters */
+	if (strchr(argv[1], '*') || strchr(argv[1], '?')) {
+		/* Separate directory path and file pattern */
+		dir_path = path;
+		file_pattern = strrchr(path, '/');
+		if (file_pattern) {
+			*file_pattern = '\0';
+			file_pattern++;
+		} else {
+			/* No directory specified, use current dir */
+			dir_path = cwd;
+			file_pattern = path;
+		}
+
+		fs_dir_t_init(&dir);
+		err = fs_opendir(&dir, dir_path);
+		if (err) {
+			shell_error(sh, "Unable to open %s (err %d)", dir_path, err);
+			return -ENOEXEC;
+		}
+
+		while (1) {
+			err = fs_readdir(&dir, &entry);
+			if (err || entry.name[0] == '\0') {
+				break;
+			}
+
+			if (entry.type == FS_DIR_ENTRY_DIR) {
+				continue;
+			}
+
+			if (wildcard_match(entry.name, file_pattern)) {
+				char full_path[MAX_PATH_LEN];
+
+				err = snprintf(full_path, sizeof(full_path), "%s/%s", dir_path,
+						entry.name);
+
+				if (err < 0) {
+					shell_error(sh, "Path encoding error");
+					continue;
+				}
+
+				err = fs_unlink(full_path);
+				if (err) {
+					shell_error(sh, "Failed to remove %s (%d)", full_path, err);
+				} else {
+					shell_print(sh, "Removed %s", full_path);
+				}
+			}
+		}
+
+		fs_closedir(&dir);
+
+		return 0;
+	}
+	/* No wildcard matching, remove the file directly */
 	err = fs_unlink(path);
 	if (err) {
 		shell_error(sh, "Failed to remove %s (%d)", path, err);
