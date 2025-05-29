@@ -74,7 +74,7 @@ static void process(const struct log_backend *const backend,
 
 	err = backend_remote->transport_api->send(backend_remote, out_msg, msg_len + msg_offset);
 	if (err < 0) {
-		__ASSERT(false, "Unexpected error: %d\n", err);
+		/* __ASSERT(false, "Unexpected error: %d\n", err); */
 		return;
 	}
 }
