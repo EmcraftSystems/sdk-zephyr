@@ -12,11 +12,18 @@
 #include <assert.h>
 #include <zephyr/fs/fs.h>
 
-#define MAX_PATH_LEN 256
+#define MAX_PATH_LEN         256
 #define MAX_FLASH_WRITE_SIZE 256
-#define LOG_PREFIX_LEN (sizeof(CONFIG_LOG_BACKEND_FS_FILE_PREFIX) - 1)
+#define LOG_PREFIX_LEN       (sizeof(CONFIG_LOG_BACKEND_FS_FILE_PREFIX) - 1)
+
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+#define UPTIME_LEN          10
+#define BOOT_NUM_LEN        4
+#define LOG_FILE_MAX_AGE_MS (CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION_INTERVAL * 60 * 60 * 1000)
+#else
 #define MAX_FILE_NUMERAL 9999
 #define FILE_NUMERAL_LEN 4
+#endif
 
 #define THREAD_PRIORITY (K_LOWEST_APPLICATION_THREAD_PRIO - 1)
 
@@ -40,13 +47,74 @@ enum backend_fs_state {
 
 static struct fs_file_t fs_file;
 static enum backend_fs_state backend_state = BACKEND_FS_NOT_INITIALIZED;
-static int file_ctr, newest, oldest;
+static int file_ctr, newest;
 
 static int allocate_new_file(struct fs_file_t *file);
 static int del_oldest_log(void);
-static int get_log_file_id(struct fs_dirent *ent);
 #ifndef CONFIG_LOG_BACKEND_FS_TESTSUITE
 static uint32_t log_format_current = CONFIG_LOG_BACKEND_FS_OUTPUT_DEFAULT;
+#if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+static int oldest;
+#endif
+#endif
+static char fname[MAX_PATH_LEN];
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+static uint32_t current_boot_number;
+static int64_t current_boot_start_uptime;
+static int64_t last_rotation_time;
+
+/**
+ * Log file metadata
+ */
+struct file_metadata {
+	int64_t uptime;
+	uint32_t boot_num;
+};
+
+/**
+ * Get log file metadata
+ */
+static int get_log_file_metadata(struct fs_dirent *ent, struct file_metadata *meta)
+{
+	char *ptr;
+	size_t prefix_len = strlen(CONFIG_LOG_BACKEND_FS_FILE_PREFIX);
+
+	if (ent->type != FS_DIR_ENTRY_FILE) {
+		return -1;
+	}
+
+	/* Expected format: prefix_bootnum_uptime */
+	if (strlen(ent->name) < prefix_len + BOOT_NUM_LEN + 1 + UPTIME_LEN) {
+		return -1;
+	}
+
+	if (memcmp(ent->name, CONFIG_LOG_BACKEND_FS_FILE_PREFIX, prefix_len) != 0) {
+		return -1;
+	}
+
+	/* Find first underscore after prefix */
+	ptr = ent->name + prefix_len;
+	if (!ptr) {
+		return -1;
+	}
+
+	/* Parse boot number */
+	meta->boot_num = atoi(ptr);
+
+	/* Find second underscore */
+	ptr = strchr(ptr + 1, '_');
+	if (!ptr) {
+		return -1;
+	}
+
+	/* Parse uptime */
+	meta->uptime = atoll(ptr + 1);
+
+	return 0;
+}
+
+#else
+static int get_log_file_id(struct fs_dirent *ent);
 #endif
 
 static int check_log_volume_available(void)
@@ -58,10 +126,7 @@ static int check_log_volume_available(void)
 	while (rc == 0) {
 		rc = fs_readmount(&index, &name);
 		if (rc == 0) {
-			if (strncmp(CONFIG_LOG_BACKEND_FS_DIR,
-				    name,
-				    strlen(name))
-			    == 0) {
+			if (strncmp(CONFIG_LOG_BACKEND_FS_DIR, name, strlen(name)) == 0) {
 				return 0;
 			}
 		}
@@ -118,9 +183,9 @@ static int create_log_dir(const char *path)
 	}
 
 	return rc;
-
 }
 
+#if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
 static int check_log_file_exist(int num)
 {
 	struct fs_dir_t dir;
@@ -155,11 +220,11 @@ static int check_log_file_exist(int num)
 	rc = 0;
 
 close_dir:
-	(void) fs_closedir(&dir);
+	(void)fs_closedir(&dir);
 
 	return rc;
 }
-
+#endif
 int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 {
 	int rc;
@@ -188,6 +253,7 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 
 			return length;
 		} else if ((size + length) > CONFIG_LOG_BACKEND_FS_FILE_SIZE) {
+
 			rc = allocate_new_file(f);
 
 			if (rc < 0) {
@@ -197,8 +263,7 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 
 		rc = fs_write(f, data, length);
 		if (rc >= 0) {
-			if (IS_ENABLED(CONFIG_LOG_BACKEND_FS_OVERWRITE) &&
-			    (rc != length)) {
+			if (IS_ENABLED(CONFIG_LOG_BACKEND_FS_OVERWRITE) && (rc != length)) {
 				del_oldest_log();
 
 				return 0;
@@ -208,7 +273,9 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 			 */
 			length = rc;
 		} else {
+#if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
 			rc = check_log_file_exist(newest);
+
 			if (rc == 0) {
 				/* file was lost somehow
 				 * try to get a new one
@@ -222,6 +289,7 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 				/* fs is corrupted*/
 				goto on_error;
 			}
+#endif
 			length = 0;
 		}
 	}
@@ -263,7 +331,7 @@ static void logfs_consumer(struct k_work *work)
 	while (k_msgq_get(&log_msgq, &msg, K_NO_WAIT) == 0) {
 
 		/* call the actual fs write routine */
-		write_log_to_file(&msg.buf, msg.len, NULL);
+		write_log_to_file((uint8_t *)&msg.buf, msg.len, NULL);
 	}
 
 	/* sync changes to fs */
@@ -274,6 +342,7 @@ static void logfs_consumer(struct k_work *work)
 	}
 }
 
+#if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
 static int get_log_file_id(struct fs_dirent *ent)
 {
 	size_t len;
@@ -301,6 +370,46 @@ static int get_log_file_id(struct fs_dirent *ent)
 
 	return -1;
 }
+#else
+/**
+ * Determine current boot number by finding the highest boot
+ * number in existing logs + 1
+ *
+ * @return Current boot number
+ */
+static uint32_t determine_boot_number(void)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent ent;
+	struct file_metadata meta;
+	uint32_t max_boot_num = 0;
+	int rc;
+
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	if (rc) {
+		return 1; /* Default to 1 if no directory */
+	}
+
+	while (true) {
+		rc = fs_readdir(&dir, &ent);
+		if ((rc < 0) || (ent.name[0] == 0)) {
+			break;
+		}
+
+		if (get_log_file_metadata(&ent, &meta) == 0) {
+			if (meta.boot_num > max_boot_num) {
+				max_boot_num = meta.boot_num;
+			}
+		}
+	}
+
+	(void)fs_closedir(&dir);
+
+	return max_boot_num + 1;
+}
+#endif /* CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION */
 
 static int allocate_new_file(struct fs_file_t *file)
 {
@@ -310,13 +419,35 @@ static int allocate_new_file(struct fs_file_t *file)
 	int rc;
 	struct fs_statvfs stat;
 	int curr_file_num;
+
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+	int64_t uptime = k_uptime_get();
+#else
 	struct fs_dirent ent;
-	char fname[MAX_PATH_LEN];
 	off_t file_size;
+#endif
 
 	assert(file);
 
 	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+		current_boot_number = determine_boot_number();
+		/* Create first file for this boot */
+		snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
+			 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, current_boot_number, uptime);
+
+		rc = fs_open(file, fname, FS_O_CREATE | FS_O_WRITE);
+		if (rc < 0) {
+			goto out;
+		}
+		file_ctr++;
+		backend_state = BACKEND_FS_OK;
+		last_rotation_time = uptime;
+		current_boot_start_uptime = uptime;
+		/* rotate logs */
+		del_oldest_log();
+		goto out;
+#else
 		/* Search for the last used log number. */
 		struct fs_dir_t dir;
 		int file_num = 0;
@@ -349,9 +480,7 @@ static int allocate_new_file(struct fs_file_t *file)
 
 		oldest = min;
 
-		if ((file_ctr > 1) &&
-		    ((max - min) >
-		     2 * CONFIG_LOG_BACKEND_FS_FILES_LIMIT)) {
+		if ((file_ctr > 1) && ((max - min) > 2 * CONFIG_LOG_BACKEND_FS_FILES_LIMIT)) {
 			/* oldest log is in the range around the min */
 			newest = min;
 			oldest = max;
@@ -417,14 +546,16 @@ static int allocate_new_file(struct fs_file_t *file)
 			}
 			backend_state = BACKEND_FS_OK;
 		}
+#endif
 	} else {
 		fs_close(file);
-
+#if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
 		curr_file_num = newest;
 		curr_file_num++;
 		if (curr_file_num > MAX_FILE_NUMERAL) {
 			curr_file_num = 0;
 		}
+#endif
 	}
 
 	rc = fs_statvfs(CONFIG_LOG_BACKEND_FS_DIR, &stat);
@@ -433,28 +564,32 @@ static int allocate_new_file(struct fs_file_t *file)
 	 * is not exceeded.
 	 */
 	while ((file_ctr >= CONFIG_LOG_BACKEND_FS_FILES_LIMIT) ||
-	       ((stat.f_bfree * stat.f_frsize) <=
-		CONFIG_LOG_BACKEND_FS_FILE_SIZE)) {
-
+	       ((stat.f_bfree * stat.f_frsize) <= CONFIG_LOG_BACKEND_FS_FILE_SIZE)) {
 		if (IS_ENABLED(CONFIG_LOG_BACKEND_FS_OVERWRITE)) {
 			rc = del_oldest_log();
 			if (rc < 0) {
 				goto out;
 			}
-
-			rc = fs_statvfs(CONFIG_LOG_BACKEND_FS_DIR,
-					&stat);
+#if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+			rc = fs_statvfs(CONFIG_LOG_BACKEND_FS_DIR, &stat);
 			if (rc < 0) {
 				goto out;
 			}
+#else
+			break;
+#endif
 		} else {
 			return -ENOSPC;
 		}
 	}
-
-	snprintf(fname, sizeof(fname), "%s/%s%04d",
-		CONFIG_LOG_BACKEND_FS_DIR,
-		CONFIG_LOG_BACKEND_FS_FILE_PREFIX, curr_file_num);
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+	snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
+		 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, current_boot_number, uptime);
+	last_rotation_time = uptime;
+#else
+	snprintf(fname, sizeof(fname), "%s/%s%04d", CONFIG_LOG_BACKEND_FS_DIR,
+		 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, curr_file_num);
+#endif
 
 	rc = fs_open(file, fname, FS_O_CREATE | FS_O_WRITE);
 	if (rc < 0) {
@@ -464,19 +599,51 @@ static int allocate_new_file(struct fs_file_t *file)
 	newest = curr_file_num;
 
 out:
+
 	return rc;
 }
 
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+/* Delete log by boot number and uptime */
+static int del_log_by_num(int boot_num, int64_t uptime)
+{
+	int rc = 0;
+
+	rc = snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
+		      CONFIG_LOG_BACKEND_FS_FILE_PREFIX, boot_num, uptime);
+	if (rc < 0) {
+		return rc;
+	}
+
+	rc = fs_unlink(fname);
+
+	return rc;
+}
+
+/* Delete log by name */
+static int del_log(const char *name)
+{
+	int rc = 0;
+
+	rc = snprintf(fname, sizeof(fname), "%s/%s", CONFIG_LOG_BACKEND_FS_DIR, name);
+	if (rc < 0) {
+		return rc;
+	}
+
+	rc = fs_unlink(fname);
+
+	return rc;
+}
+#endif
+
 static int del_oldest_log(void)
 {
-	int rc;
-	static char dellname[MAX_PATH_LEN];
-
+	int rc = 0;
+#if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
 	while (true) {
-		snprintf(dellname, sizeof(dellname), "%s/%s%04d",
-			 CONFIG_LOG_BACKEND_FS_DIR,
+		snprintf(fname, sizeof(fname), "%s/%s%04d", CONFIG_LOG_BACKEND_FS_DIR,
 			 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, oldest);
-		rc = fs_unlink(dellname);
+		rc = fs_unlink(fname);
 
 		if ((rc == 0) || (rc == -ENOENT)) {
 			oldest++;
@@ -492,7 +659,104 @@ static int del_oldest_log(void)
 			break;
 		}
 	}
+#else
+	struct fs_dir_t dir;
+	struct fs_dirent ent;
+	struct file_metadata meta;
+	long long session_start_time = -1, session_end_time = -1;
+	long long total_duration = 0;
+	int boot_num = -1;
 
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	if (rc) {
+		return rc;
+	}
+	/**
+	 * Calculate total duration of all logs
+	 */
+	while (true) {
+		rc = fs_readdir(&dir, &ent);
+		if (rc < 0) {
+			break;
+		}
+
+		if (get_log_file_metadata(&ent, &meta) == 0) {
+			if (boot_num == -1) {
+				boot_num = meta.boot_num;
+				session_start_time = meta.uptime;
+				session_end_time = meta.uptime;
+			} else if (boot_num != meta.boot_num) {
+				total_duration += (session_end_time - session_start_time);
+				session_start_time = -1;
+				session_end_time = -1;
+				boot_num = meta.boot_num;
+			} else {
+				if (meta.uptime > session_end_time) {
+					session_end_time = meta.uptime;
+				}
+			}
+		} else {
+			break;
+		}
+	}
+	/* Add last boot as well*/
+	total_duration += (session_end_time - session_start_time);
+
+	(void)fs_closedir(&dir);
+
+	if (total_duration > LOG_FILE_MAX_AGE_MS) {
+		boot_num = -1;
+		session_start_time = -1;
+		session_end_time = -1;
+
+		rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+		if (rc) {
+			return rc;
+		}
+
+		while (true) {
+			rc = fs_readdir(&dir, &ent);
+			if (rc < 0) {
+				break;
+			}
+
+			if (get_log_file_metadata(&ent, &meta) == 0) {
+				if (boot_num == -1) {
+					boot_num = meta.boot_num;
+					session_start_time = meta.uptime;
+					session_end_time = meta.uptime;
+				} else if (boot_num != meta.boot_num) {
+					/* Remove last log from previous boot */
+					rc = del_log_by_num(boot_num, session_end_time);
+					if (rc < 0) {
+						break;
+					}
+					total_duration -= (session_end_time - session_start_time);
+					session_start_time = -1;
+					session_end_time = -1;
+					boot_num = meta.boot_num;
+				} else if (meta.uptime > session_end_time) {
+					session_end_time = meta.uptime;
+					rc = del_log(ent.name);
+					if (rc < 0) {
+						break;
+					}
+					total_duration -= (session_end_time - session_start_time);
+				}
+			} else {
+				break;
+			}
+
+			if (total_duration < LOG_FILE_MAX_AGE_MS) {
+				break;
+			}
+		}
+
+		(void)fs_closedir(&dir);
+	}
+#endif
 	return rc;
 }
 
@@ -507,12 +771,13 @@ LOG_OUTPUT_DEFINE(log_output, logfs_producer, buf, MAX_FLASH_WRITE_SIZE);
 static void log_backend_fs_init(const struct log_backend *const backend)
 {
 	int rc;
-	struct k_work_queue_config cfg = { .name = "log_fs", };
+	struct k_work_queue_config cfg = {
+		.name = "log_fs",
+	};
 
 	k_work_queue_init(&logfs_queue_work_q);
 	k_work_queue_start(&logfs_queue_work_q, logfs_queue_stack_area,
-			K_THREAD_STACK_SIZEOF(logfs_queue_stack_area),
-			THREAD_PRIORITY, &cfg);
+			   K_THREAD_STACK_SIZEOF(logfs_queue_stack_area), THREAD_PRIORITY, &cfg);
 	k_work_init(&logfs_msg_work, logfs_consumer);
 
 	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
@@ -547,8 +812,7 @@ static void dropped(const struct log_backend *const backend, uint32_t cnt)
 	}
 }
 
-static void process(const struct log_backend *const backend,
-		union log_msg_generic *msg)
+static void process(const struct log_backend *const backend, union log_msg_generic *msg)
 {
 	uint32_t flags = log_backend_std_get_flags();
 
@@ -571,8 +835,7 @@ static const struct log_backend_api log_backend_fs_api = {
 	.format_set = format_set,
 };
 
-LOG_BACKEND_DEFINE(log_backend_fs, log_backend_fs_api,
-		   IS_ENABLED(CONFIG_LOG_BACKEND_FS_AUTOSTART));
+LOG_BACKEND_DEFINE(log_backend_fs, log_backend_fs_api, IS_ENABLED(CONFIG_LOG_BACKEND_FS_AUTOSTART));
 
 const struct log_backend *log_backend_fs_get(void)
 {
