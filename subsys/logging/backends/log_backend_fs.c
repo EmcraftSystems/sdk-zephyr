@@ -678,7 +678,7 @@ static int del_oldest_log(void)
 	 */
 	while (true) {
 		rc = fs_readdir(&dir, &ent);
-		if (rc < 0) {
+		if (rc < 0 || ent.name[0] == 0) {
 			break;
 		}
 
@@ -692,19 +692,16 @@ static int del_oldest_log(void)
 				session_start_time = -1;
 				session_end_time = -1;
 				boot_num = meta.boot_num;
-			} else {
-				if (meta.uptime > session_end_time) {
-					session_end_time = meta.uptime;
-				}
+			} else if (meta.uptime > session_end_time) {
+				session_end_time = meta.uptime;
 			}
-		} else {
-			break;
 		}
 	}
 	/* Add last boot as well*/
 	total_duration += (session_end_time - session_start_time);
 
 	(void)fs_closedir(&dir);
+
 
 	if (total_duration > LOG_FILE_MAX_AGE_MS) {
 		boot_num = -1;
@@ -718,10 +715,9 @@ static int del_oldest_log(void)
 
 		while (true) {
 			rc = fs_readdir(&dir, &ent);
-			if (rc < 0) {
+			if (rc < 0 || ent.name[0] == 0) {
 				break;
 			}
-
 			if (get_log_file_metadata(&ent, &meta) == 0) {
 				if (boot_num == -1) {
 					boot_num = meta.boot_num;
@@ -745,15 +741,12 @@ static int del_oldest_log(void)
 					}
 					total_duration -= (session_end_time - session_start_time);
 				}
-			} else {
-				break;
 			}
 
 			if (total_duration < LOG_FILE_MAX_AGE_MS) {
 				break;
 			}
 		}
-
 		(void)fs_closedir(&dir);
 	}
 #endif
