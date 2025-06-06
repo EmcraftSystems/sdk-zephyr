@@ -39,6 +39,8 @@ void log_multidomain_link_on_recv_cb(struct log_multidomain_link *link_remote,
 		link_remote->status = 0;
 	}
 
+	link_remote->last_cmd = msg->id;
+
 	switch (msg->id) {
 	case Z_LOG_MULTIDOMAIN_ID_MSG:
 		z_log_msg_enqueue(link_remote->link,
@@ -104,7 +106,13 @@ static int getter_msg_process(struct log_multidomain_link *link_remote,
 		return err;
 	}
 
-	return (link_remote->status == Z_LOG_MULTIDOMAIN_STATUS_OK) ? 0 : -EIO;
+	if ((link_remote->last_cmd == msg->id) &&
+			(link_remote->status == Z_LOG_MULTIDOMAIN_STATUS_OK)) {
+		err = 0;
+	} else {
+		err = -EIO;
+	}
+	return err;
 }
 
 static int link_remote_get_domain_count(struct log_multidomain_link *link_remote,
