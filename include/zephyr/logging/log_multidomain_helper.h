@@ -174,6 +174,7 @@ struct log_multidomain_link {
 	const struct log_link *link;
 	union log_multidomain_link_dst dst;
 	int status;
+	int last_cmd;
 	bool ready;
 };
 
