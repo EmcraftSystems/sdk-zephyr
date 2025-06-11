@@ -82,10 +82,18 @@ config LOG_BACKEND_FS_TIME_BASED_ROTATION
 if LOG_BACKEND_FS_TIME_BASED_ROTATION
 
 config LOG_BACKEND_FS_TIME_BASED_ROTATION_INTERVAL
-	int "Time based log rotation interval"
+	int "Time based log rotation interval in hours"
 	default 72
 	help
-	  Time interval in hours for log rotation.
+	  Time interval in hours for log rotation. Log files that are older than
+	  this interval are deleted.
+
+config LOG_BACKEND_FS_MAX_FILE_TIME
+	int "Max open time for a single log file, in minutes"
+	default 30
+	help
+	  Time interval during which a single log file is used for writing. Upon
+	  interval expiration the log backend switches to a new file.
 
 endif # LOG_BACKEND_FS_TIME_BASED_ROTATION
 

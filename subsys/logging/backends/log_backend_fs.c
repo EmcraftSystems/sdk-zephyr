@@ -17,9 +17,11 @@
 #define LOG_PREFIX_LEN       (sizeof(CONFIG_LOG_BACKEND_FS_FILE_PREFIX) - 1)
 
 #if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
-#define UPTIME_LEN          10
-#define BOOT_NUM_LEN        4
-#define LOG_FILE_MAX_AGE_MS (CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION_INTERVAL * 60 * 60 * 1000)
+#define UPTIME_LEN		10
+#define BOOT_NUM_LEN		4
+#define LOG_FILE_MAX_AGE_MS	\
+	(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION_INTERVAL * 60 * 60 * 1000)
+#define NEW_FILE_INTERVAL_MS	(CONFIG_LOG_BACKENDFS_MAX_FILE_TIME * 60 * 1000)
 #else
 #define MAX_FILE_NUMERAL 9999
 #define FILE_NUMERAL_LEN 4
@@ -252,7 +254,9 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 			backend_state = BACKEND_FS_CORRUPTED;
 
 			return length;
-		} else if ((size + length) > CONFIG_LOG_BACKEND_FS_FILE_SIZE) {
+		} else if ((size + length) > CONFIG_LOG_BACKEND_FS_FILE_SIZE ||
+				(k_uptime_get() - last_rotation_time) >
+				NEW_FILE_INTERVAL_MS) {
 
 			rc = allocate_new_file(f);
 
@@ -402,6 +406,7 @@ static uint32_t determine_boot_number(void)
 			if (meta.boot_num > max_boot_num) {
 				max_boot_num = meta.boot_num;
 			}
+			file_ctr++;
 		}
 	}
 
@@ -411,6 +416,7 @@ static uint32_t determine_boot_number(void)
 }
 #endif /* CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION */
 
+static uint64_t get_logs_duration(void);
 static int allocate_new_file(struct fs_file_t *file)
 {
 	/* In case of no log file or current file fills up
@@ -564,7 +570,8 @@ static int allocate_new_file(struct fs_file_t *file)
 	 * is not exceeded.
 	 */
 	while ((file_ctr >= CONFIG_LOG_BACKEND_FS_FILES_LIMIT) ||
-	       ((stat.f_bfree * stat.f_frsize) <= CONFIG_LOG_BACKEND_FS_FILE_SIZE)) {
+	       ((stat.f_bfree * stat.f_frsize) <= CONFIG_LOG_BACKEND_FS_FILE_SIZE) ||
+	       get_logs_duration() > (uint64_t)LOG_FILE_MAX_AGE_MS) {
 		if (IS_ENABLED(CONFIG_LOG_BACKEND_FS_OVERWRITE)) {
 			rc = del_oldest_log();
 			if (rc < 0) {
@@ -575,8 +582,6 @@ static int allocate_new_file(struct fs_file_t *file)
 			if (rc < 0) {
 				goto out;
 			}
-#else
-			break;
 #endif
 		} else {
 			return -ENOSPC;
@@ -585,7 +590,6 @@ static int allocate_new_file(struct fs_file_t *file)
 #if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
 	snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
 		 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, current_boot_number, uptime);
-	last_rotation_time = uptime;
 #else
 	snprintf(fname, sizeof(fname), "%s/%s%04d", CONFIG_LOG_BACKEND_FS_DIR,
 		 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, curr_file_num);
@@ -596,6 +600,7 @@ static int allocate_new_file(struct fs_file_t *file)
 		goto out;
 	}
 	++file_ctr;
+	last_rotation_time = uptime;
 	newest = curr_file_num;
 
 out:
@@ -636,6 +641,57 @@ static int del_log(const char *name)
 }
 #endif
 
+static uint64_t get_logs_duration(void)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent ent;
+	struct file_metadata meta;
+	uint64_t session_start_time = -1, session_end_time = -1;
+	uint64_t total_duration = 0;
+	int boot_num = -1;
+	int rc;
+
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	if (rc) {
+		return -1;
+	}
+
+	/**
+	 * Calculate total duration of all logs
+	 */
+	while (true) {
+		rc = fs_readdir(&dir, &ent);
+		if (rc < 0 || ent.name[0] == 0) {
+			break;
+		}
+
+		if (get_log_file_metadata(&ent, &meta) == 0) {
+			if (boot_num == meta.boot_num &&
+					meta.uptime > session_end_time) {
+				session_end_time = meta.uptime;
+			} else {
+				if (boot_num != -1) {
+					total_duration += ((session_end_time -
+						session_start_time) +
+							NEW_FILE_INTERVAL_MS/2);
+				}
+				session_start_time = meta.uptime;
+				session_end_time = meta.uptime;
+				boot_num = meta.boot_num;
+			}
+		}
+	}
+
+	/* Add last boot as well*/
+	total_duration += (session_end_time - session_start_time);
+
+	(void)fs_closedir(&dir);
+
+	return total_duration;
+}
+
 static int del_oldest_log(void)
 {
 	int rc = 0;
@@ -663,9 +719,8 @@ static int del_oldest_log(void)
 	struct fs_dir_t dir;
 	struct fs_dirent ent;
 	struct file_metadata meta;
-	long long session_start_time = -1, session_end_time = -1;
-	long long total_duration = 0;
-	int boot_num = -1;
+	uint64_t min_ts = -1;
+	uint32_t min_bid = -1;
 
 	fs_dir_t_init(&dir);
 
@@ -673,89 +728,31 @@ static int del_oldest_log(void)
 	if (rc) {
 		return rc;
 	}
-	/**
-	 * Calculate total duration of all logs
-	 */
+
 	while (true) {
 		rc = fs_readdir(&dir, &ent);
-		if (rc < 0) {
+		if (rc < 0 || ent.name[0] == 0) {
 			break;
 		}
 
 		if (get_log_file_metadata(&ent, &meta) == 0) {
-			if (boot_num == -1) {
-				boot_num = meta.boot_num;
-				session_start_time = meta.uptime;
-				session_end_time = meta.uptime;
-			} else if (boot_num != meta.boot_num) {
-				total_duration += (session_end_time - session_start_time);
-				session_start_time = -1;
-				session_end_time = -1;
-				boot_num = meta.boot_num;
-			} else {
-				if (meta.uptime > session_end_time) {
-					session_end_time = meta.uptime;
-				}
+			if (meta.boot_num < min_bid) {
+				min_bid = meta.boot_num;
+				min_ts = meta.uptime;
+			} else if (min_bid == meta.boot_num && meta.uptime <
+					min_ts) {
+				min_ts = meta.uptime;
 			}
-		} else {
-			break;
 		}
 	}
-	/* Add last boot as well*/
-	total_duration += (session_end_time - session_start_time);
+
+	rc = del_log_by_num(min_bid, min_ts);
+
+	if (!rc) {
+		--file_ctr;
+	}
 
 	(void)fs_closedir(&dir);
-
-	if (total_duration > LOG_FILE_MAX_AGE_MS) {
-		boot_num = -1;
-		session_start_time = -1;
-		session_end_time = -1;
-
-		rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
-		if (rc) {
-			return rc;
-		}
-
-		while (true) {
-			rc = fs_readdir(&dir, &ent);
-			if (rc < 0) {
-				break;
-			}
-
-			if (get_log_file_metadata(&ent, &meta) == 0) {
-				if (boot_num == -1) {
-					boot_num = meta.boot_num;
-					session_start_time = meta.uptime;
-					session_end_time = meta.uptime;
-				} else if (boot_num != meta.boot_num) {
-					/* Remove last log from previous boot */
-					rc = del_log_by_num(boot_num, session_end_time);
-					if (rc < 0) {
-						break;
-					}
-					total_duration -= (session_end_time - session_start_time);
-					session_start_time = -1;
-					session_end_time = -1;
-					boot_num = meta.boot_num;
-				} else if (meta.uptime > session_end_time) {
-					session_end_time = meta.uptime;
-					rc = del_log(ent.name);
-					if (rc < 0) {
-						break;
-					}
-					total_duration -= (session_end_time - session_start_time);
-				}
-			} else {
-				break;
-			}
-
-			if (total_duration < LOG_FILE_MAX_AGE_MS) {
-				break;
-			}
-		}
-
-		(void)fs_closedir(&dir);
-	}
 #endif
 	return rc;
 }
