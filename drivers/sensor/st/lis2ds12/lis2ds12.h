@@ -30,6 +30,14 @@
 	((_odr <= 1) ? 1 : \
 	((31 - __builtin_clz(_odr / 25))) + 3)
 
+/* Return data rate in Hz for given register value */
+#define LIS2DS12_REG_TO_ODR(_reg)                                                                  \
+	((_reg == 0)   ? 0                                                                         \
+	 : (_reg == 1) ? 1                                                                         \
+	 : (_reg == 2) ? 12                                                                        \
+	 : (_reg > 11) ? 6400                                                                      \
+		       : (1 << (_reg - 3)) * 25)
+
 struct lis2ds12_config {
 	stmdev_ctx_t ctx;
 	union {
@@ -46,6 +54,8 @@ struct lis2ds12_config {
 #ifdef CONFIG_LIS2DS12_TRIGGER
 	struct gpio_dt_spec gpio_int;
 #endif
+	uint8_t ff_ths;
+	uint16_t ff_dur;
 };
 
 struct lis2ds12_data {
@@ -53,12 +63,14 @@ struct lis2ds12_data {
 	int sample_y;
 	int sample_z;
 	float gain;
+	/* output data rate */
+	uint16_t odr;
 
 #ifdef CONFIG_LIS2DS12_TRIGGER
 	struct gpio_callback gpio_cb;
 
-	const struct sensor_trigger *data_ready_trigger;
-	sensor_trigger_handler_t data_ready_handler;
+	const struct sensor_trigger *trigger;
+	sensor_trigger_handler_t handler;
 	const struct device *dev;
 
 #if defined(CONFIG_LIS2DS12_TRIGGER_OWN_THREAD)

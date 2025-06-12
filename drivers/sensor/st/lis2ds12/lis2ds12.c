@@ -28,6 +28,7 @@ static int lis2ds12_set_odr(const struct device *dev, uint8_t odr)
 	const struct lis2ds12_config *cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	lis2ds12_odr_t val;
+	struct lis2ds12_data *data = dev->data;
 
 	/* check if power off */
 	if (odr == 0U) {
@@ -93,6 +94,7 @@ static int lis2ds12_set_odr(const struct device *dev, uint8_t odr)
 		return -ENOTSUP;
 	}
 
+	data->odr = odr;
 	return lis2ds12_xl_data_rate_set(ctx, val);
 }
 
@@ -353,12 +355,14 @@ static int lis2ds12_init(const struct device *dev)
 #define LIS2DS12_CFG_IRQ(inst)
 #endif /* CONFIG_LIS2DS12_TRIGGER */
 
-#define LIS2DS12_CONFIG_COMMON(inst)					\
-	.range = DT_INST_PROP(inst, range),				\
-	.pm = DT_INST_PROP(inst, power_mode),				\
-	.odr = DT_INST_PROP(inst, odr),					\
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, irq_gpios),		\
-			(LIS2DS12_CFG_IRQ(inst)), ())
+#define LIS2DS12_CONFIG_COMMON(inst)                                                               \
+	.range = DT_INST_PROP(inst, range), .pm = DT_INST_PROP(inst, power_mode),                  \
+	.odr = DT_INST_PROP(inst, odr),                                                            \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, irq_gpios), (LIS2DS12_CFG_IRQ(inst)), ())          \
+		COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, ff_threshold),                             \
+			    (.ff_ths = DT_INST_PROP(inst, ff_threshold),), ())                     \
+			COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, ff_duration),                      \
+				    (.ff_dur = DT_INST_PROP(inst, ff_duration),), ())
 
 #define LIS2DS12_SPI_OPERATION (SPI_WORD_SET(8) |			\
 				SPI_OP_MODE_MASTER |			\
