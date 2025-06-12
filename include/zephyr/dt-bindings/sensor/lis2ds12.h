@@ -26,4 +26,14 @@
 #define LIS2DS12_DT_ODR_3200Hz_HF		10 /* available in HF mode only */
 #define LIS2DS12_DT_ODR_6400Hz_HF		11 /* available in HF mode only */
 
+/* Free-fall parameters */
+#define LIS2DS12_DT_FF_THS_156_mg 0
+#define LIS2DS12_DT_FF_THS_219_mg 1
+#define LIS2DS12_DT_FF_THS_250_mg 2
+#define LIS2DS12_DT_FF_THS_312_mg 3
+#define LIS2DS12_DT_FF_THS_344_mg 4
+#define LIS2DS12_DT_FF_THS_406_mg 5
+#define LIS2DS12_DT_FF_THS_469_mg 6
+#define LIS2DS12_DT_FF_THS_500_mg 7
+
 #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_ST_LIS2DS12_H_ */

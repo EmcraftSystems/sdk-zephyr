@@ -37,26 +37,27 @@ static void lis2ds12_gpio_callback(const struct device *dev,
 #endif
 }
 
-static void lis2ds12_handle_drdy_int(const struct device *dev)
-{
-	struct lis2ds12_data *data = dev->data;
-
-	if (data->data_ready_handler != NULL) {
-		data->data_ready_handler(dev, data->data_ready_trigger);
-	}
-}
-
 static void lis2ds12_handle_int(const struct device *dev)
 {
 	const struct lis2ds12_config *cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	lis2ds12_all_sources_t sources;
+	lis2ds12_status_t istatus;
 	int ret;
+	struct lis2ds12_data *data = dev->data;
 
 	lis2ds12_all_sources_get(ctx, &sources);
 
-	if (sources.status_dup.drdy) {
-		lis2ds12_handle_drdy_int(dev);
+	if ((data->trigger->type == SENSOR_TRIG_DATA_READY && sources.status_dup.drdy) ||
+	    (data->trigger->type == SENSOR_TRIG_FREEFALL && sources.status_dup.ff_ia)) {
+		if (data->handler != NULL) {
+			data->handler(dev, data->trigger);
+		}
+	}
+
+	if (data->trigger->type == SENSOR_TRIG_FREEFALL) {
+		/* clear the interrupt */
+		lis2ds12_status_reg_get(ctx, &istatus);
 	}
 
 	ret = gpio_pin_interrupt_configure_dt(&cfg->gpio_int,
@@ -96,10 +97,15 @@ static int lis2ds12_init_interrupt(const struct device *dev)
 	const struct lis2ds12_config *cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
 	lis2ds12_pin_int1_route_t route;
-	int err;
+	struct lis2ds12_data *data = dev->data;
+	int err = 0;
 
 	/* Enable pulsed mode */
-	err = lis2ds12_int_notification_set(ctx, LIS2DS12_INT_PULSED);
+	if (data->trigger->type == SENSOR_TRIG_DATA_READY) {
+		err = lis2ds12_int_notification_set(ctx, LIS2DS12_INT_PULSED);
+	} else if (data->trigger->type == SENSOR_TRIG_FREEFALL) {
+		err = lis2ds12_int_notification_set(ctx, LIS2DS12_INT_LATCHED);
+	}
 	if (err < 0) {
 		return err;
 	}
@@ -110,12 +116,44 @@ static int lis2ds12_init_interrupt(const struct device *dev)
 		return err;
 	}
 
-	route.int1_drdy = 1;
+	if (data->trigger->type == SENSOR_TRIG_DATA_READY) {
+		route.int1_drdy = 1;
+	} else if (data->trigger->type == SENSOR_TRIG_FREEFALL) {
+		route.int1_ff = 1;
+	}
 
 	err = lis2ds12_pin_int1_route_set(ctx, route);
 	if (err < 0) {
 		return err;
 	}
+
+	return 0;
+}
+
+static int lis2ds12_ff_init(const struct device *dev)
+{
+	const struct lis2ds12_config *cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+	struct lis2ds12_data *lis2ds12 = dev->data;
+	uint16_t duration;
+	int ret;
+
+	ret = lis2ds12_ff_threshold_set(ctx, cfg->ff_ths);
+	if (ret < 0) {
+		LOG_ERR("%s: ff threshold init error", dev->name);
+		return ret;
+	}
+
+	duration = (LIS2DS12_REG_TO_ODR(lis2ds12->odr) * cfg->ff_dur) / 1000;
+
+	ret = lis2ds12_ff_dur_set(ctx, duration);
+	if (ret < 0) {
+		LOG_ERR("%s: ff duration init error", dev->name);
+		return ret;
+	}
+
+	LOG_DBG("%s: set FF parameters threshold %d, duration %d (%dms)", dev->name, cfg->ff_ths,
+		duration, cfg->ff_dur);
 
 	return 0;
 }
@@ -186,7 +224,20 @@ int lis2ds12_trigger_set(const struct device *dev,
 	int16_t raw[3];
 	int ret;
 
-	__ASSERT_NO_MSG(trig->type == SENSOR_TRIG_DATA_READY);
+	__ASSERT_NO_MSG((trig->type == SENSOR_TRIG_DATA_READY) ||
+			(trig->type == SENSOR_TRIG_FREEFALL));
+
+	if (trig->type == SENSOR_TRIG_FREEFALL) {
+		ret = lis2ds12_ff_init(dev);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	if (data->trigger != NULL) {
+		LOG_ERR("another trigger is already set");
+		return -EBUSY;
+	}
 
 	if (cfg->gpio_int.port == NULL) {
 		LOG_ERR("trigger_set is not supported");
@@ -199,7 +250,7 @@ int lis2ds12_trigger_set(const struct device *dev,
 		return ret;
 	}
 
-	data->data_ready_handler = handler;
+	data->handler = handler;
 	if (handler == NULL) {
 		LOG_WRN("lis2ds12: no handler");
 		return 0;
@@ -208,7 +259,7 @@ int lis2ds12_trigger_set(const struct device *dev,
 	/* re-trigger lost interrupt */
 	lis2ds12_acceleration_raw_get(ctx, raw);
 
-	data->data_ready_trigger = trig;
+	data->trigger = trig;
 
 	lis2ds12_init_interrupt(dev);
 	return gpio_pin_interrupt_configure_dt(&cfg->gpio_int,
