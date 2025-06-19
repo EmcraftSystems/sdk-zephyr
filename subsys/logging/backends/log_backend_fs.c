@@ -28,7 +28,7 @@
 #define FILE_NUMERAL_LEN 4
 #endif
 
-#define THREAD_PRIORITY (K_LOWEST_APPLICATION_THREAD_PRIO - 1)
+#define THREAD_PRIORITY (K_LOWEST_APPLICATION_THREAD_PRIO - 2)
 
 struct logfs_msg {
 	uint8_t buf[MAX_FLASH_WRITE_SIZE];
@@ -317,6 +317,7 @@ static int logfs_producer(uint8_t *data, size_t length, void *ctx)
 	ret = k_msgq_put(&log_msgq, &msg, K_NO_WAIT);
 	if (ret) {
 		/* msgq is full */
+		k_yield();
 		return 0;
 	}
 
