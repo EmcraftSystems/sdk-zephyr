@@ -452,8 +452,6 @@ static int allocate_new_file(struct fs_file_t *file)
 		backend_state = BACKEND_FS_OK;
 		last_rotation_time = uptime;
 		current_boot_start_uptime = uptime;
-		/* rotate logs */
-		del_oldest_log();
 		goto out;
 #else
 		/* Search for the last used log number. */
