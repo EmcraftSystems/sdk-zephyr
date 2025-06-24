@@ -147,11 +147,86 @@ static int lis2ds12_accel_config(const struct device *dev,
 	return 0;
 }
 
+static int lis2ds12_attr_set_ff_dur(const struct device *dev,
+					enum sensor_channel chan,
+					enum sensor_attribute attr,
+					const struct sensor_value *val)
+{
+	int rc;
+	uint16_t duration;
+	const struct lis2ds12_config *cfg = dev->config;
+	struct lis2ds12_data *data = dev->data;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+
+	/* can only be set for all directions at once */
+	if (chan != SENSOR_CHAN_ACCEL_XYZ) {
+		return -EINVAL;
+	}
+
+	/**
+	 * The given duration in milliseconds with the val
+	 * parameter is converted into register specific value.
+	 */
+	duration = (LIS2DS12_REG_TO_ODR(data->odr) * (uint16_t)sensor_value_to_double(val)) / 1000;
+
+	LOG_DBG("Freefall: duration is %d ms", (uint16_t)sensor_value_to_double(val));
+	rc = lis2ds12_ff_dur_set(ctx, duration);
+	if (rc != 0) {
+		LOG_ERR("Failed to set freefall duration");
+		return -EIO;
+	}
+
+	return rc;
+}
+
+static const uint8_t lis12ds2_ff_thres_decode[] = {5, 7, 8, 10, 11, 13, 15, 16};
+
+static int lis2ds12_attr_set_ff_ths(const struct device *dev,
+					enum sensor_channel chan,
+					enum sensor_attribute attr,
+					const struct sensor_value *val)
+{
+	int rc;
+	double threshold;
+	uint8_t ths_reg;
+	const struct lis2ds12_config *cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+
+	/* can only be set for all directions at once */
+	if (chan != SENSOR_CHAN_ACCEL_XYZ) {
+		return -EINVAL;
+	}
+
+	threshold = sensor_value_to_double(val);
+
+	if (threshold < 0 || threshold > 500.0) {
+		return -EINVAL;
+	}
+
+	for (ths_reg = 8; ths_reg > 0; ths_reg--) {
+		if ((uint8_t)(threshold / 31.25) >= lis12ds2_ff_thres_decode[ths_reg])
+			break;
+	}
+
+	rc = lis2ds12_ff_threshold_set(ctx, ths_reg);
+	if (rc != 0) {
+		LOG_ERR("Failed to set freefall threshold");
+		return -EIO;
+	}
+	return rc;
+}
+
 static int lis2ds12_attr_set(const struct device *dev,
 			     enum sensor_channel chan,
 			     enum sensor_attribute attr,
 			     const struct sensor_value *val)
 {
+	if (attr == SENSOR_ATTR_FF_DUR) {
+		return lis2ds12_attr_set_ff_dur(dev, chan, attr, val);
+	} else if (attr == SENSOR_ATTR_FF_THS) {
+		return lis2ds12_attr_set_ff_ths(dev, chan, attr, val);
+	}
+
 	switch (chan) {
 	case SENSOR_CHAN_ACCEL_XYZ:
 		return lis2ds12_accel_config(dev, chan, attr, val);
@@ -162,6 +237,67 @@ static int lis2ds12_attr_set(const struct device *dev,
 
 	return 0;
 }
+
+static int lis2ds12_attr_get_ff_dur(const struct device *dev,
+		struct sensor_value *val)
+{
+	int rc;
+	uint8_t duration;
+	const struct lis2ds12_config *cfg = dev->config;
+	struct lis2ds12_data *data = dev->data;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+
+	rc = lis2ds12_ff_dur_get(ctx, &duration);
+	if (rc != 0) {
+		LOG_ERR("Failed to get freefall duration");
+		return -EIO;
+	}
+
+	val->val1 = ((int32_t) duration * 1000) / LIS2DS12_REG_TO_ODR(data->odr);
+	val->val2 = 0;
+
+	return rc;
+}
+
+static int lis2ds12_attr_get_ff_ths(const struct device *dev,
+		struct sensor_value *val)
+{
+	int rc;
+	uint8_t threshold;
+	double t;
+	const struct lis2ds12_config *cfg = dev->config;
+	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
+
+	rc = lis2ds12_ff_threshold_get(ctx, &threshold);
+	if (rc != 0) {
+		LOG_ERR("Failed to get freefall threshold");
+		return -EIO;
+	}
+
+	t = 31.25 * (double)lis12ds2_ff_thres_decode[threshold];
+	sensor_value_from_double(val, t);
+
+	return rc;
+}
+
+static int lis2ds12_attr_get(const struct device *dev,
+		enum sensor_channel chan,
+		enum sensor_attribute attr,
+		struct sensor_value *val)
+{
+	int ret;
+
+	if (attr == SENSOR_ATTR_FF_DUR) {
+		ret = lis2ds12_attr_get_ff_dur(dev, val);
+	} else if (attr == SENSOR_ATTR_FF_THS) {
+		ret = lis2ds12_attr_get_ff_ths(dev, val);
+	} else {
+		ret = -ENOTSUP;
+	}
+
+	return ret;
+}
+
 
 static int lis2ds12_sample_fetch_accel(const struct device *dev)
 {
@@ -262,6 +398,7 @@ static int lis2ds12_channel_get(const struct device *dev,
 
 static const struct sensor_driver_api lis2ds12_driver_api = {
 	.attr_set = lis2ds12_attr_set,
+	.attr_get = lis2ds12_attr_get,
 #if defined(CONFIG_LIS2DS12_TRIGGER)
 	.trigger_set = lis2ds12_trigger_set,
 #endif
