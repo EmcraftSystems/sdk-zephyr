@@ -340,6 +340,9 @@ enum sensor_attribute {
 	 *  to the new sampling frequency.
 	 */
 	SENSOR_ATTR_FF_DUR,
+	/** Free-fall threshold represented in milli-gs.
+	 */
+	SENSOR_ATTR_FF_THS,
 
 	/** Hardware batch duration in ticks */
 	SENSOR_ATTR_BATCH_DURATION,
