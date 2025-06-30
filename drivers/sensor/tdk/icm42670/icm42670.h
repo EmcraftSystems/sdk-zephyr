@@ -104,7 +104,6 @@ struct icm42670_config {
 	uint16_t gyro_hz;
 	uint16_t gyro_filt_bw;
 	uint8_t accel_pwr_mode;
-	uint8_t apex;
 };
 
 #ifdef CONFIG_TDK_APEX
@@ -122,7 +121,7 @@ void icm42670_apex_pedometer_cadence_convert(struct sensor_value *val, uint8_t r
 int icm42670_apex_enable_pedometer(const struct device *dev, inv_imu_device_t *s);
 int icm42670_apex_enable_tilt(inv_imu_device_t *s);
 int icm42670_apex_enable_smd(inv_imu_device_t *s);
-int icm42670_apex_enable_wom(inv_imu_device_t *s);
+int icm42670_apex_enable_wom(inv_imu_device_t *s, const struct sensor_value *threshold);
 #endif
 
 #endif /* ZEPHYR_DRIVERS_SENSOR_ICM42670_H_ */

@@ -18,14 +18,6 @@ menuconfig ICM42670
 		|| $(dt_compat_on_bus,$(DT_COMPAT_INVENSENSE_ICM42670S),spi)
 	select I2C if $(dt_compat_on_bus,$(DT_COMPAT_INVENSENSE_ICM42670P),i2c) \
 		|| $(dt_compat_on_bus,$(DT_COMPAT_INVENSENSE_ICM42670S),i2c)
-	select TDK_APEX if $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670p),apex,pedometer) \
-		|| $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670p),apex,tilt) \
-		|| $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670p),apex,smd) \
-		|| $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670p),apex,wom) \
-		|| $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670s),apex,pedometer) \
-		|| $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670s),apex,tilt) \
-		|| $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670s),apex,smd) \
-		|| $(dt_node_str_prop_equals,$(dt_nodelabel_path,icm42670s),apex,wom)
 	help
 	  Enable driver for ICM42670 SPI-based or I2C-based Six-Axis Motion Tracking device.
 

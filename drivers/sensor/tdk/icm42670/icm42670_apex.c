@@ -6,6 +6,7 @@
 
 #include "icm42670.h"
 #include "imu/inv_imu_apex.h"
+#include <math.h>
 
 int icm42670_apex_enable(inv_imu_device_t *s)
 {
@@ -141,11 +142,13 @@ int icm42670_apex_enable_smd(inv_imu_device_t *s)
 	return rc;
 }
 
-int icm42670_apex_enable_wom(inv_imu_device_t *s)
+int icm42670_apex_enable_wom(inv_imu_device_t *s, const struct sensor_value *threshold)
 {
 	int rc = 0;
+	uint8_t val = 0;
 	inv_imu_interrupt_parameter_t config_int = {(inv_imu_interrupt_value)0};
 
+	inv_imu_disable_wom(s);
 	/*
 	 * Optimize power consumption:
 	 * - Disable FIFO usage.
@@ -165,11 +168,11 @@ int icm42670_apex_enable_wom(inv_imu_device_t *s)
 	rc |= inv_imu_enable_accel_low_power_mode(s);
 
 	/*
-	 * Configure WOM thresholds for each axis to 195 mg (Resolution 1g/256)
-	 * WOM threshold = 50 * 1000 / 256 = 195 mg
-	 * and enable WOM
+	 * Configure WOM thresholds for each axis and enable WOM
+	 * e.g. WOM threshold = 50 * 1000 / 256 = 195 mg
 	 */
-	rc |= inv_imu_configure_wom(s, 50, 50, 50, WOM_CONFIG_WOM_INT_MODE_ORED,
+	val = (uint8_t)floor((threshold->val1) / 3.921f);
+	rc |= inv_imu_configure_wom(s, val, val, val, WOM_CONFIG_WOM_INT_MODE_ORED,
 				    WOM_CONFIG_WOM_INT_DUR_1_SMPL);
 	rc |= inv_imu_enable_wom(s);
 
