@@ -45,25 +45,34 @@ static void lis2ds12_handle_int(const struct device *dev)
 	lis2ds12_status_t istatus;
 	int ret;
 	struct lis2ds12_data *data = dev->data;
-
-	lis2ds12_all_sources_get(ctx, &sources);
-
-	if ((data->trigger->type == SENSOR_TRIG_DATA_READY && sources.status_dup.drdy) ||
-	    (data->trigger->type == SENSOR_TRIG_FREEFALL && sources.status_dup.ff_ia)) {
-		if (data->handler != NULL) {
-			data->handler(dev, data->trigger);
-		}
-	}
+	lis2ds12_wake_up_src_t wake_up_src;
 
 	if (data->trigger->type == SENSOR_TRIG_FREEFALL) {
-		/* clear the interrupt */
-		lis2ds12_status_reg_get(ctx, &istatus);
+		lis2ds12_read_reg(ctx, LIS2DS12_STATUS_DUP, (uint8_t *)&istatus, 1);
+		if (istatus.ff_ia) {
+			if (data->handler != NULL) {
+				data->handler(dev, data->trigger);
+			}
+		}
+	} else {
+		lis2ds12_all_sources_get(ctx, &sources);
+
+		if (data->trigger->type == SENSOR_TRIG_DATA_READY && sources.status_dup.drdy) {
+			if (data->handler != NULL) {
+				data->handler(dev, data->trigger);
+			}
+		}
 	}
 
 	ret = gpio_pin_interrupt_configure_dt(&cfg->gpio_int,
 					      GPIO_INT_EDGE_TO_ACTIVE);
 	if (ret < 0) {
 		LOG_ERR("%s: Not able to configure pin_int", dev->name);
+	}
+
+	if (data->trigger->type == SENSOR_TRIG_FREEFALL) {
+		lis2ds12_read_reg(ctx, LIS2DS12_WAKE_UP_SRC,
+				  (uint8_t *)&wake_up_src, 1);
 	}
 }
 
