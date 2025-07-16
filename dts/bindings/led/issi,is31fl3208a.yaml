@@ -1,0 +1,30 @@
+# Copyright (c) 2025 Emcraft Systems
+
+description: |
+  is31fl3208a LED driver for Lumissil Microsystems (a division of ISSI)
+
+compatible: "issi,is31fl3208a"
+
+include: ["i2c-device.yaml", "led-controller.yaml"]
+
+properties:
+  max-output-current:
+    required: true
+    type: int
+    enum:
+      - 0
+      - 16
+      - 17
+      - 18
+      - 19
+    description: |
+      LED current limit index.
+
+child-binding:
+  properties:
+    label:
+      required: true
+    index:
+      required: true
+    color-mapping:
+      required: true
