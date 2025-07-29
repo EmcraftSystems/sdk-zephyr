@@ -634,21 +634,6 @@ static int del_log_by_num(int boot_num, int64_t uptime)
 
 	return rc;
 }
-
-/* Delete log by name */
-static int del_log(const char *name)
-{
-	int rc = 0;
-
-	rc = snprintf(fname, sizeof(fname), "%s/%s", CONFIG_LOG_BACKEND_FS_DIR, name);
-	if (rc < 0) {
-		return rc;
-	}
-
-	rc = fs_unlink(fname);
-
-	return rc;
-}
 #endif
 
 static uint64_t get_logs_duration(void)
