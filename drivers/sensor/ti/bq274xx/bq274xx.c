@@ -621,7 +621,12 @@ static int bq274xx_sample_fetch(const struct device *dev, enum sensor_channel ch
 	}
 
 	if (chan == SENSOR_CHAN_ALL || chan == SENSOR_CHAN_GAUGE_STATE_OF_CHARGE) {
-		ret = bq274xx_cmd_reg_read(dev, BQ274XX_CMD_SOC,
+		const struct bq274xx_config *config = dev->config;
+		const unsigned char cmd = config->report_unfiltered_soc
+					? BQ274XX_CMD_SOC_UNFL
+					: BQ274XX_CMD_SOC;
+
+		ret = bq274xx_cmd_reg_read(dev, cmd,
 					   &data->state_of_charge);
 		if (ret < 0) {
 			LOG_ERR("Failed to read state of charge");
@@ -874,6 +879,7 @@ static const struct sensor_driver_api bq274xx_battery_driver_api = {
 		.terminate_voltage = DT_INST_PROP(index, terminate_voltage),	\
 		.chemistry_id = DT_INST_PROP_OR(index, chemistry_id, 0),			\
 		.lazy_loading = DT_INST_PROP(index, zephyr_lazy_load),		\
+		.report_unfiltered_soc = DT_INST_PROP(index, report_unfiltered_soc),		\
 	};									\
 										\
 	PM_BQ274XX_DT_INST_DEFINE(index, bq274xx_pm_action);			\
