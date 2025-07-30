@@ -56,3 +56,10 @@ properties:
     description: |
       Configuring the sensor can take a long time, using lazy loading we can delay
       until the first sample request and keep the boot time as short as possible.
+
+  report_unfiltered_soc:
+    type: boolean
+    description: |
+      Report StateOfChargeUnfiltered() instead of StateOfCharge().
+      This is workaround for the case where fully charged(FC) is not
+      detected, so StateOfCharge() is kept at 99% despite charge stopped.

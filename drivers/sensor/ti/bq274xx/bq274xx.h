@@ -127,6 +127,7 @@ struct bq274xx_config {
 #endif
 	uint16_t chemistry_id;
 	bool lazy_loading;
+	bool report_unfiltered_soc;
 };
 
 int bq274xx_trigger_mode_init(const struct device *dev);
