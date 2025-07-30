@@ -416,6 +416,16 @@ static uint32_t determine_boot_number(void)
 
 	return max_boot_num + 1;
 }
+
+uint32_t log_backend_fs_get_boot_id(void)
+{
+	if (backend_state == BACKEND_FS_OK) {
+		return current_boot_number;
+	} else {
+		return -1;
+	}
+}
+
 #endif /* CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION */
 
 static uint64_t get_logs_duration(void);
@@ -616,21 +626,6 @@ static int del_log_by_num(int boot_num, int64_t uptime)
 
 	rc = snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
 		      CONFIG_LOG_BACKEND_FS_FILE_PREFIX, boot_num, uptime);
-	if (rc < 0) {
-		return rc;
-	}
-
-	rc = fs_unlink(fname);
-
-	return rc;
-}
-
-/* Delete log by name */
-static int del_log(const char *name)
-{
-	int rc = 0;
-
-	rc = snprintf(fname, sizeof(fname), "%s/%s", CONFIG_LOG_BACKEND_FS_DIR, name);
 	if (rc < 0) {
 		return rc;
 	}
