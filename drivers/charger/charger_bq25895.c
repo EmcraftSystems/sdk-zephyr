@@ -622,6 +622,12 @@ static int bq25895_init(const struct device *dev)
 
 	k_work_init_delayable(&data->int_routine_work, bq25895_int_routine_work_handler);
 
+	ret = k_work_reschedule(&data->int_routine_work, BQ25895_POLL_DELAY);
+	if (ret < 0) {
+		LOG_ERR("Could not set reschedule poll: %d", ret);
+		return ret;
+	}
+
 	ret = bq25895_configure_interrupt_pin(dev);
 	if (ret < 0) {
 		LOG_ERR("Could not set interrupt GPIO callback: %d", ret);
