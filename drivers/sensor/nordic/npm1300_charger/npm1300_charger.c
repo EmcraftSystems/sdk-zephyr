@@ -456,6 +456,7 @@ int npm1300_charger_init(const struct device *dev)
 {
 	const struct npm1300_charger_config *const config = dev->config;
 	uint16_t idx;
+	uint8_t reg = 0;
 	int ret;
 
 	if (!device_is_ready(config->mfd)) {
@@ -469,7 +470,12 @@ int npm1300_charger_init(const struct device *dev)
 		return ret;
 	}
 
-	ret = set_ntc_thresholds(config);
+	if ((config->thermistor_ohms != 0) && (config->thermistor_beta != 0)) {
+		ret = set_ntc_thresholds(config);
+	} else {
+		reg = 2U;
+		ret = mfd_npm1300_reg_write(config->mfd, CHGR_BASE, CHGR_OFFSET_DIS_SET, reg);
+	}
 	if (ret != 0) {
 		return ret;
 	}
@@ -590,7 +596,8 @@ int npm1300_charger_init(const struct device *dev)
 
 	/* Disable automatic recharging if configured */
 	if (config->disable_recharge) {
-		ret = mfd_npm1300_reg_write(config->mfd, CHGR_BASE, CHGR_OFFSET_DIS_SET, 1U);
+		reg |= 1U;
+		ret = mfd_npm1300_reg_write(config->mfd, CHGR_BASE, CHGR_OFFSET_DIS_SET, reg);
 		if (ret != 0) {
 			return ret;
 		}

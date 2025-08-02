@@ -50,8 +50,9 @@ properties:
 
   thermistor-ohms:
     type: int
-    required: true
+    default: 0
     enum:
+      - 0
       - 10000
       - 47000
       - 100000
@@ -59,7 +60,7 @@ properties:
 
   thermistor-beta:
     type: int
-    required: true
+    default: 0
     description: Beta value of selected thermistor.
 
   thermistor-cold-millidegrees:
