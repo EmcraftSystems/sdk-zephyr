@@ -180,6 +180,19 @@ int cfb_invert_area(const struct device *dev, uint16_t x, uint16_t y,
 int cfb_framebuffer_finalize(const struct device *dev);
 
 /**
+ * @brief Set updated framebuffer area for partial updates.
+ *
+ * @param dev Pointer to device structure for driver instance
+ * @param x Position in X direction of the beginning of area
+ * @param y Position in Y direction of the beginning of area
+ * @param ex Position in X direction of the end of area
+ * @param ey Position in Y direction of the end of area
+ *
+ * @return 0 on success, negative value otherwise
+ */
+int cfb_framebuffer_set_updated_window(const struct device *dev, int x, int y, int ex, int ey);
+
+/**
  * @brief Get display parameter.
  *
  * @param dev Pointer to device structure for driver instance
