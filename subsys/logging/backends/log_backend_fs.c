@@ -9,6 +9,7 @@
 #include <zephyr/logging/log_backend.h>
 #include <zephyr/logging/log_output_dict.h>
 #include <zephyr/logging/log_backend_std.h>
+#include <zephyr/logging/log_backend_fs.h>
 #include <assert.h>
 #include <zephyr/fs/fs.h>
 
@@ -749,6 +750,59 @@ static int del_oldest_log(void)
 
 	(void)fs_closedir(&dir);
 #endif
+	return rc;
+}
+
+int log_backend_fs_clear_logs(bool activate)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent dirent;
+	int rc;
+	char path[sizeof(CONFIG_LOG_BACKEND_FS_DIR) + MAX_PATH_LEN + 1];
+	struct k_work_sync sync;
+	const struct log_backend *backend = log_backend_fs_get();
+
+	/* Deactivate backend and stop the producer */
+	log_backend_deactivate(backend);
+
+	/* Cancel consumer */
+	k_work_cancel_sync(&logfs_msg_work, &sync);
+
+	/* Close current opened file */
+	fs_close(&fs_file);
+
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	if (rc) {
+		return -EIO;
+	}
+
+	while (true) {
+		rc = fs_readdir(&dir, &dirent);
+		if (rc < 0) {
+			rc = -EIO;
+			break;
+		}
+		if (dirent.name[0] == 0) {
+			break;
+		}
+
+		snprintf(path, sizeof(CONFIG_LOG_BACKEND_FS_DIR) + MAX_PATH_LEN + 1, "%s/%s",
+				CONFIG_LOG_BACKEND_FS_DIR, dirent.name);
+
+		(void)fs_unlink(path);
+	}
+
+	(void)fs_closedir(&dir);
+
+	backend_state = BACKEND_FS_NOT_INITIALIZED;
+
+	/* Optionally re-activate the backend */
+	if (activate) {
+		log_backend_activate(backend, NULL);
+	}
+
 	return rc;
 }
 
