@@ -439,9 +439,9 @@ static int bq274xx_gauge_configure(const struct device *dev)
 
 		/* Try again entering the CONFIG UPDATE mode */
 		ret = bq274xx_mode_cfgupdate(dev, true);
-	}
-	if (ret < 0) {
-		return ret;
+		if (ret < 0) {
+			return ret;
+		}
 	}
 
 	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_CONTROL, 0x00);
