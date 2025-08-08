@@ -415,6 +415,32 @@ static int bq274xx_gauge_configure(const struct device *dev)
 
 	ret = bq274xx_mode_cfgupdate(dev, true);
 	if (ret < 0) {
+		/* We observed a failure to enter the CONFIG UPDATE mode
+		 * just after exiting the CONFIG UPDATE mode.
+		 * This can happen when the device initialization starts
+		 * for the second time after unexpected board reset.
+		 * The below operations seem to recover from this error.
+		 */
+		LOG_ERR("Attempt to recover");
+
+		k_sleep(K_MSEC(2000));
+
+		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_A);
+		if (ret < 0) {
+			LOG_ERR("Unable to unseal the battery");
+			return -EIO;
+		}
+
+		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_B);
+		if (ret < 0) {
+			LOG_ERR("Unable to unseal the battery");
+			return -EIO;
+		}
+
+		/* Try again entering the CONFIG UPDATE mode */
+		ret = bq274xx_mode_cfgupdate(dev, true);
+	}
+	if (ret < 0) {
 		return ret;
 	}
 
