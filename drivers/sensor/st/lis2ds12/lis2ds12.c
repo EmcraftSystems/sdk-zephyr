@@ -147,13 +147,13 @@ static int lis2ds12_accel_config(const struct device *dev,
 	return 0;
 }
 
-static int lis2ds12_attr_set_ff_dur(const struct device *dev,
+int lis2ds12_set_ff_dur(const struct device *dev,
 					enum sensor_channel chan,
-					enum sensor_attribute attr,
-					const struct sensor_value *val)
+					double duration)
 {
 	int rc;
-	uint16_t duration;
+	double max_duration, min_duration;
+	uint16_t reg_val;
 	const struct lis2ds12_config *cfg = dev->config;
 	struct lis2ds12_data *data = dev->data;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
@@ -167,10 +167,18 @@ static int lis2ds12_attr_set_ff_dur(const struct device *dev,
 	 * The given duration in milliseconds with the val
 	 * parameter is converted into register specific value.
 	 */
-	duration = (LIS2DS12_REG_TO_ODR(data->odr) * (uint16_t)sensor_value_to_double(val)) / 1000;
+	min_duration = (1000 / (double)LIS2DS12_REG_TO_ODR(data->odr));
+	max_duration = min_duration * 63;
 
-	LOG_DBG("Freefall: duration is %d ms", (uint16_t)sensor_value_to_double(val));
-	rc = lis2ds12_ff_dur_set(ctx, duration);
+	if ((duration != 0) && ((duration < min_duration) || (duration > max_duration))) {
+		LOG_ERR("Freefall duration should be in %f - %f range", min_duration, max_duration);
+		return -EINVAL;
+	}
+
+	reg_val = duration / min_duration;
+
+	LOG_DBG("Freefall duration is %f ms, range %f - %f", duration, min_duration, max_duration);
+	rc = lis2ds12_ff_dur_set(ctx, reg_val);
 	if (rc != 0) {
 		LOG_ERR("Failed to set freefall duration");
 		return -EIO;
@@ -199,7 +207,7 @@ static int lis2ds12_attr_set_ff_ths(const struct device *dev,
 
 	threshold = sensor_value_to_double(val);
 
-	if (threshold < 0 || threshold > 500.0) {
+	if ((threshold < 156.25) || threshold > 500.0) {
 		return -EINVAL;
 	}
 
@@ -222,7 +230,7 @@ static int lis2ds12_attr_set(const struct device *dev,
 			     const struct sensor_value *val)
 {
 	if (attr == SENSOR_ATTR_FF_DUR) {
-		return lis2ds12_attr_set_ff_dur(dev, chan, attr, val);
+		return lis2ds12_set_ff_dur(dev, chan, sensor_value_to_double(val));
 	} else if (attr == SENSOR_ATTR_FF_THS) {
 		return lis2ds12_attr_set_ff_ths(dev, chan, attr, val);
 	}
@@ -253,8 +261,7 @@ static int lis2ds12_attr_get_ff_dur(const struct device *dev,
 		return -EIO;
 	}
 
-	val->val1 = ((int32_t) duration * 1000) / LIS2DS12_REG_TO_ODR(data->odr);
-	val->val2 = 0;
+	sensor_value_from_double(val, (double)(duration * 1000) / LIS2DS12_REG_TO_ODR(data->odr));
 
 	return rc;
 }

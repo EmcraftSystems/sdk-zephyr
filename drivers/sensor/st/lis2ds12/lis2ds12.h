@@ -84,6 +84,10 @@ struct lis2ds12_data {
 #endif /* CONFIG_LIS2DS12_TRIGGER */
 };
 
+int lis2ds12_set_ff_dur(const struct device *dev,
+					enum sensor_channel chan,
+					double duration);
+
 #ifdef CONFIG_LIS2DS12_TRIGGER
 int lis2ds12_trigger_set(const struct device *dev,
 			 const struct sensor_trigger *trig,
