@@ -143,8 +143,6 @@ static int lis2ds12_ff_init(const struct device *dev)
 {
 	const struct lis2ds12_config *cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
-	struct lis2ds12_data *lis2ds12 = dev->data;
-	uint16_t duration;
 	int ret;
 
 	ret = lis2ds12_ff_threshold_set(ctx, cfg->ff_ths);
@@ -153,16 +151,14 @@ static int lis2ds12_ff_init(const struct device *dev)
 		return ret;
 	}
 
-	duration = (LIS2DS12_REG_TO_ODR(lis2ds12->odr) * cfg->ff_dur) / 1000;
-
-	ret = lis2ds12_ff_dur_set(ctx, duration);
+	ret = lis2ds12_set_ff_dur(dev, SENSOR_CHAN_ACCEL_XYZ, cfg->ff_dur);
 	if (ret < 0) {
 		LOG_ERR("%s: ff duration init error", dev->name);
 		return ret;
 	}
 
-	LOG_DBG("%s: set FF parameters threshold %d, duration %d (%dms)", dev->name, cfg->ff_ths,
-		duration, cfg->ff_dur);
+	LOG_DBG("%s: set FF parameters threshold %d, duration %d ms", dev->name, cfg->ff_ths,
+		    cfg->ff_dur);
 
 	return 0;
 }
