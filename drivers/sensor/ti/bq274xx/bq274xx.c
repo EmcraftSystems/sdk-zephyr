@@ -251,7 +251,19 @@ static int bq274xx_mode_cfgupdate(const struct device *dev, bool enabled)
 	}
 
 	if (try >= BQ274XX_CFGUP_MAX_TRIES) {
-		LOG_ERR("Config mode change timeout");
+		uint16_t status;
+
+		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_STATUS);
+		if (ret < 0) {
+			LOG_ERR("Unable to write control register(status)");
+		}
+
+		ret = bq274xx_cmd_reg_read(dev, BQ274XX_CMD_CONTROL, &status);
+		if (ret < 0) {
+			LOG_ERR("Unable to read register(status)");
+		}
+		LOG_ERR("Config mode timeout, enabled: %d, flags: %04x status: %04x", enabled,
+			flags, status);
 		return -EIO;
 	}
 
@@ -491,7 +503,27 @@ static int bq274xx_gauge_configure(const struct device *dev)
 
 	ret = bq274xx_mode_cfgupdate(dev, false);
 	if (ret < 0) {
-		return ret;
+		LOG_ERR("Failed to exit CONFIG UPDATE mode, attempting recovery");
+
+		/* Recovery for exit CONFIG UPDATE mode failure */
+		k_sleep(K_MSEC(1000));
+
+		/* Try soft reset to recover from stuck state */
+		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SOFT_RESET);
+		if (ret < 0) {
+			LOG_ERR("Soft reset failed during exit recovery");
+			return -EIO;
+		}
+
+		/* Wait for reset to complete */
+		k_sleep(K_MSEC(500));
+
+		/* Try exiting CONFIG UPDATE mode again */
+		ret = bq274xx_mode_cfgupdate(dev, false);
+		if (ret < 0) {
+			LOG_ERR("Exit CONFIG UPDATE mode recovery failed");
+			return ret;
+		}
 	}
 
 	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SEALED);
