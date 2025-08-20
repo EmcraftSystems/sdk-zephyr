@@ -22,13 +22,6 @@ void k_heap_init(struct k_heap *heap, void *mem, size_t bytes)
 
 static int statics_init(void)
 {
-#if defined(CONFIG_HEAP_MEM_TAKE_REMAINDER)
-	extern struct k_heap _system_heap;
-
-	k_heap_init(&_system_heap, (void *)&_image_ram_end,
-		    (uint32_t)&__kernel_ram_end - (uint32_t)&_image_ram_end);
-#endif
-
 	STRUCT_SECTION_FOREACH(k_heap, heap) {
 #if defined(CONFIG_DEMAND_PAGING) && !defined(CONFIG_LINKER_GENERIC_SECTIONS_PRESENT_AT_BOOT)
 		/* Some heaps may not present at boot, so we need to wait for

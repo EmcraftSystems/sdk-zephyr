@@ -749,12 +749,6 @@ config HEAP_MEM_POOL_IGNORE_MIN
 	  when optimizing memory usage and a more precise minimum heap size
 	  is known for a given application.
 
-config HEAP_MEM_TAKE_REMAINDER
-	bool "Use all remaining RAM for heap memory pool"
-	help
-	  This option can be set to use all remaining memory for heap memory
-	  pool rather than specifying constant size.
-
 endif # KERNEL_MEM_POOL
 
 endmenu
