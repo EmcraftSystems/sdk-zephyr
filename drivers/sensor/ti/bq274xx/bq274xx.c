@@ -262,7 +262,7 @@ static int bq274xx_mode_cfgupdate(const struct device *dev, bool enabled)
 		if (ret < 0) {
 			LOG_ERR("Unable to read register(status)");
 		}
-		LOG_ERR("Config mode timeout, enabled: %d, flags: %04x status: %04x", enabled,
+		LOG_WRN("Config mode timeout, enabled: %d, flags: %04x status: %04x", enabled,
 			flags, status);
 		return -EIO;
 	}
@@ -433,7 +433,7 @@ static int bq274xx_gauge_configure(const struct device *dev)
 		 * for the second time after unexpected board reset.
 		 * The below operations seem to recover from this error.
 		 */
-		LOG_ERR("Attempt to recover");
+		LOG_WRN("Attempt to recover");
 
 		k_sleep(K_MSEC(2000));
 
