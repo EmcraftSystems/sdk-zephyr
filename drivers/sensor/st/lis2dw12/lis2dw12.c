@@ -16,6 +16,8 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/sensor.h>
 
+#include <zephyr/kernel.h>
+
 #if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
 #include <zephyr/drivers/spi.h>
 #elif DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
@@ -424,6 +426,7 @@ static int lis2dw12_init(const struct device *dev)
 	/* reset device */
 	ret = lis2dw12_reset_set(ctx, PROPERTY_ENABLE);
 	if (ret < 0) {
+		LOG_ERR("Device reset failed: ret=%d", ret);
 		return ret;
 	}
 
@@ -439,6 +442,7 @@ static int lis2dw12_init(const struct device *dev)
 	LOG_DBG("power-mode is %d", cfg->pm);
 	ret = lis2dw12_set_power_mode(dev, cfg->pm);
 	if (ret < 0) {
+		LOG_ERR("Power mode setting failed: ret=%d", ret);
 		return ret;
 	}
 
@@ -502,6 +506,42 @@ static int lis2dw12_init(const struct device *dev)
 	return 0;
 }
 
+/**
+ * lis2dw12_init_with_retry - Initialize device with retry logic
+ * @dev: Pointer to instance of struct device
+ *
+ * This function tries to initialize the device multiple times if it fails.
+ * This helps when the device doesn't start properly after the system restarts.
+ */
+static int lis2dw12_init_with_retry(const struct device *dev)
+{
+	int ret;
+	int retry_count = 0;
+
+	while (retry_count < LIS2DW12_INIT_RETRY_COUNT) {
+		ret = lis2dw12_init(dev);
+		if (ret == 0) {
+			LOG_DBG("Init successful on attempt %d", retry_count + 1);
+			return 0;
+		}
+
+		retry_count++;
+		LOG_WRN("Initialization attempt %d failed: ret=%d", retry_count, ret);
+
+		if (retry_count < LIS2DW12_INIT_RETRY_COUNT) {
+			k_msleep(LIS2DW12_INIT_RETRY_DELAY_MS);
+
+			/* Additional delay after reset failures */
+			if (ret == -EIO || ret == -EINVAL) {
+				k_msleep(LIS2DW12_INIT_RETRY_DELAY_AFTER_RESET_MS);
+			}
+		}
+	}
+
+	LOG_ERR("Device initialization failed after %d attempts", retry_count);
+	return ret;
+}
+
 #if DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 0
 #warning "LIS2DW12 driver enabled without any devices"
 #endif
@@ -513,13 +553,13 @@ static int lis2dw12_init(const struct device *dev)
 
 #define LIS2DW12_DEVICE_INIT(inst)					\
 	SENSOR_DEVICE_DT_INST_DEFINE(inst,				\
-			    lis2dw12_init,				\
-			    NULL,					\
-			    &lis2dw12_data_##inst,			\
-			    &lis2dw12_config_##inst,			\
-			    POST_KERNEL,				\
-			    CONFIG_SENSOR_INIT_PRIORITY,		\
-			    &lis2dw12_driver_api);
+				    lis2dw12_init_with_retry,		\
+				    NULL,				\
+				    &lis2dw12_data_##inst,		\
+				    &lis2dw12_config_##inst,		\
+				    POST_KERNEL,			\
+				    CONFIG_SENSOR_INIT_PRIORITY,		\
+				    &lis2dw12_driver_api);
 
 /*
  * Instantiation macros used when a device is on a SPI bus.
