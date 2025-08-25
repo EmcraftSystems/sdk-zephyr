@@ -551,15 +551,10 @@ static int lis2dw12_init_with_retry(const struct device *dev)
  * LIS2DW12_DEFINE_I2C().
  */
 
-#define LIS2DW12_DEVICE_INIT(inst)					\
-	SENSOR_DEVICE_DT_INST_DEFINE(inst,				\
-				    lis2dw12_init_with_retry,		\
-				    NULL,				\
-				    &lis2dw12_data_##inst,		\
-				    &lis2dw12_config_##inst,		\
-				    POST_KERNEL,			\
-				    CONFIG_SENSOR_INIT_PRIORITY,		\
-				    &lis2dw12_driver_api);
+#define LIS2DW12_DEVICE_INIT(inst)                                                                 \
+	SENSOR_DEVICE_DT_INST_DEFINE(inst, lis2dw12_init_with_retry, NULL, &lis2dw12_data_##inst,  \
+				     &lis2dw12_config_##inst, POST_KERNEL,                         \
+				     CONFIG_SENSOR_INIT_PRIORITY, &lis2dw12_driver_api);
 
 /*
  * Instantiation macros used when a device is on a SPI bus.
