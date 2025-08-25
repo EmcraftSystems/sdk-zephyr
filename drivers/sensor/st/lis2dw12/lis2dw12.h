@@ -59,9 +59,9 @@
 #define LIS2DW12_SHIFT_PMOTHER		2
 
 /* Retry configuration for initialization */
-#define LIS2DW12_INIT_RETRY_COUNT			3
-#define LIS2DW12_INIT_RETRY_DELAY_MS			50
-#define LIS2DW12_INIT_RETRY_DELAY_AFTER_RESET_MS		100
+#define LIS2DW12_INIT_RETRY_COUNT                3
+#define LIS2DW12_INIT_RETRY_DELAY_MS             50
+#define LIS2DW12_INIT_RETRY_DELAY_AFTER_RESET_MS 100
 
 /**
  * struct lis2dw12_device_config - lis2dw12 hw configuration
