@@ -81,6 +81,16 @@ config COMMON_LIBC_MALLOC_ARENA_SIZE
 	  16kB and all other systems will default to using all remaining
 	  ram for the malloc heap.
 
+config COMMON_LIBC_MALLOC_RETRY_COUNT
+	int "Number of retries to allocate memory before bailing out"
+	depends on COMMON_LIBC_MALLOC
+	default 1
+
+config COMMON_LIBC_MALLOC_RETRY_TIMEOUT
+	int "Number of milliseconds to wait on memory allocation falure before retry"
+	depends on COMMON_LIBC_MALLOC
+	default 0
+
 config COMMON_LIBC_CALLOC
 	bool "Common C library calloc"
 	depends on COMMON_LIBC_MALLOC

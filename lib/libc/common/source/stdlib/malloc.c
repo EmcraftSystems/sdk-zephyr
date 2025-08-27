@@ -153,33 +153,53 @@ malloc_unlock(void)
 
 void *malloc(size_t size)
 {
-	malloc_lock();
+	int retries = CONFIG_COMMON_LIBC_MALLOC_RETRY_COUNT;
+	void *ret;
 
-	void *ret = sys_heap_aligned_alloc(&z_malloc_heap,
-					   __alignof__(z_max_align_t),
-					   size);
-	if (ret == NULL && size != 0) {
-		errno = ENOMEM;
+	while (retries--) {
+		malloc_lock();
+
+		ret = sys_heap_aligned_alloc(&z_malloc_heap,
+					     __alignof__(z_max_align_t),
+					     size);
+
+		malloc_unlock();
+
+		if (ret == NULL && size != 0) {
+			errno = ENOMEM;
+			if (retries) {
+				k_sleep(K_MSEC(CONFIG_COMMON_LIBC_MALLOC_RETRY_TIMEOUT));
+			}
+		} else {
+			break;
+		}
 	}
-
-	malloc_unlock();
 
 	return ret;
 }
 
 void *aligned_alloc(size_t alignment, size_t size)
 {
-	malloc_lock();
+	int retries = CONFIG_COMMON_LIBC_MALLOC_RETRY_COUNT;
+	void *ret;
 
-	void *ret = sys_heap_aligned_alloc(&z_malloc_heap,
-					   alignment,
-					   size);
-	if (ret == NULL && size != 0) {
-		errno = ENOMEM;
+	while (retries--) {
+		malloc_lock();
+
+		ret = sys_heap_aligned_alloc(&z_malloc_heap,
+					     alignment,
+					     size);
+
+		malloc_unlock();
+		if (ret == NULL && size != 0) {
+			errno = ENOMEM;
+			if (retries) {
+				k_sleep(K_MSEC(CONFIG_COMMON_LIBC_MALLOC_RETRY_TIMEOUT));
+			}
+		} else {
+			break;
+		}
 	}
-
-	malloc_unlock();
-
 	return ret;
 }
 
@@ -254,17 +274,27 @@ static int malloc_prepare(void)
 
 void *realloc(void *ptr, size_t requested_size)
 {
-	malloc_lock();
+	int retries = CONFIG_COMMON_LIBC_MALLOC_RETRY_COUNT;
+	void *ret;
 
-	void *ret = sys_heap_aligned_realloc(&z_malloc_heap, ptr,
-					     __alignof__(z_max_align_t),
-					     requested_size);
+	while (retries--) {
+		malloc_lock();
 
-	if (ret == NULL && requested_size != 0) {
-		errno = ENOMEM;
+		ret = sys_heap_aligned_realloc(&z_malloc_heap, ptr,
+					       __alignof__(z_max_align_t),
+					       requested_size);
+
+		malloc_unlock();
+
+		if (ret == NULL && requested_size != 0) {
+			errno = ENOMEM;
+			if (retries) {
+				k_sleep(K_MSEC(CONFIG_COMMON_LIBC_MALLOC_RETRY_TIMEOUT));
+			}
+		} else {
+			break;
+		}
 	}
-
-	malloc_unlock();
 
 	return ret;
 }
@@ -274,6 +304,11 @@ void free(void *ptr)
 	malloc_lock();
 	sys_heap_free(&z_malloc_heap, ptr);
 	malloc_unlock();
+}
+
+void get_libc_heap_info(struct sys_memory_stats *stats)
+{
+	return sys_heap_runtime_stats_get(&z_malloc_heap, stats);
 }
 
 SYS_INIT(malloc_prepare, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_LIBC);

@@ -31,6 +31,7 @@ void free(void *ptr);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *ptr, size_t size);
 void *reallocarray(void *ptr, size_t nmemb, size_t size);
+void get_libc_heap_info(struct sys_memory_stats *stats);
 
 void *bsearch(const void *key, const void *array,
 	      size_t count, size_t size,
