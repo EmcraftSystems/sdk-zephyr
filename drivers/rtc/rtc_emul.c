@@ -9,6 +9,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/rtc.h>
+#include <zephyr/settings/settings.h>
 
 #include "rtc_utils.h"
 
@@ -49,6 +50,10 @@ struct rtc_emul_data {
 #ifdef CONFIG_RTC_CALIBRATION
 	int32_t calibration;
 #endif /* CONFIG_RTC_CALIBRATION */
+
+#ifdef CONFIG_SETTINGS
+	bool settings_loaded;
+#endif /* CONFIG_SETTINGS */
 };
 
 static const uint8_t rtc_emul_days_in_month[12] = {
@@ -249,6 +254,13 @@ static int rtc_emul_set_time(const struct device *dev, const struct rtc_time *ti
 		data->datetime_set = true;
 	}
 
+#ifdef CONFIG_SETTINGS
+	if (data->settings_loaded) {
+		/* Save updated time to settings */
+		settings_save_one("rtc_emul/time", &data->datetime, sizeof(data->datetime));
+	}
+#endif /* CONFIG_SETTINGS */
+
 	return 0;
 }
 
@@ -445,9 +457,43 @@ static const struct rtc_driver_api rtc_emul_driver_api = {
 #endif /* CONFIG_RTC_CALIBRATION */
 };
 
-int rtc_emul_init(const struct device *dev)
+static int rtc_emul_settings_set(const char *name, size_t len, settings_read_cb read_cb,
+				 void *cb_arg)
+{
+	struct rtc_emul_data *data = cb_arg;
+
+	if (strcmp(name, "time") == 0) {
+		if (len != sizeof(data->datetime)) {
+			return -EINVAL;
+		}
+
+		if (read_cb(cb_arg, &data->datetime, len) == len) {
+			data->datetime_set = true;
+			return 0;
+		}
+
+		return -EIO;
+	}
+
+	return -ENOENT;
+}
+
+static int rtc_emul_init(const struct device *dev)
 {
 	struct rtc_emul_data *data = (struct rtc_emul_data *)dev->data;
+
+#ifdef CONFIG_SETTINGS
+	data->settings_loaded = false;
+	int rc = settings_subsys_init();
+	if (rc < 0 && rc != -EALREADY) {
+		return rc;
+	}
+
+	rc = settings_load_subtree_direct("rtc_emul", rtc_emul_settings_set, data);
+	if (rc == 0) {
+		data->settings_loaded = true;
+	}
+#endif /* CONFIG_SETTINGS */
 
 	data->dwork.dev = dev;
 	k_work_init_delayable(&data->dwork.dwork, rtc_emul_update);
