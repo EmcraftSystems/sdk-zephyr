@@ -11,6 +11,9 @@
 #include <zephyr/drivers/rtc.h>
 #include <zephyr/settings/settings.h>
 
+#include <string.h>
+#include <stdio.h>
+
 #include "rtc_utils.h"
 
 struct rtc_emul_data;
@@ -506,6 +509,33 @@ static int rtc_emul_init(const struct device *dev)
 	}
 	data->save_counter = 0;
 #endif /* CONFIG_SETTINGS */
+
+#if defined(CONFIG_SETTINGS)
+	if (!data->datetime_set)
+#endif
+	{
+		/* Initialize RTC time with Zephyr build time */
+		static const char *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+		char month[4];
+		int year, mday, hour, min, sec, mon = 0;
+		sscanf(__DATE__, "%3s %d %d", month, &mday, &year);
+		sscanf(__TIME__, "%d:%d:%d", &hour, &min, &sec);
+		for (int i = 0; i < 12; i++) {
+			if (strncmp(month, months + i * 3, 3) == 0) {
+				mon = i;
+				break;
+			}
+		}
+		data->datetime.tm_year = year - 1900;
+		data->datetime.tm_mon = mon;
+		data->datetime.tm_mday = mday;
+		data->datetime.tm_hour = hour;
+		data->datetime.tm_min = min;
+		data->datetime.tm_sec = sec;
+		data->datetime.tm_isdst = -1;
+		data->datetime.tm_nsec = 0;
+		data->datetime_set = true;
+	}
 
 	data->dwork.dev = dev;
 	k_work_init_delayable(&data->dwork.dwork, rtc_emul_update);
