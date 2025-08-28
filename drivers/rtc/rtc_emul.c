@@ -53,6 +53,7 @@ struct rtc_emul_data {
 
 #ifdef CONFIG_SETTINGS
 	bool settings_loaded;
+	uint32_t save_counter; /* Add this line */
 #endif /* CONFIG_SETTINGS */
 };
 
@@ -225,6 +226,16 @@ static void rtc_emul_update(struct k_work *work)
 
 	K_SPINLOCK(&data->lock) {
 		rtc_emul_increment_tm(&data->datetime);
+
+#ifdef CONFIG_SETTINGS
+		if (data->datetime_set && data->settings_loaded) {
+			data->save_counter++;
+			if (data->save_counter >= CONFIG_RTC_EMUL_SAVE_PERIOD_SEC) {
+				settings_save_one("rtc_emul/time", &data->datetime, sizeof(data->datetime));
+				data->save_counter = 0;
+			}
+		}
+#endif /* CONFIG_SETTINGS */
 
 #ifdef CONFIG_RTC_ALARM
 		rtc_emul_test_alarms(dev);
@@ -493,6 +504,7 @@ static int rtc_emul_init(const struct device *dev)
 	if (rc == 0) {
 		data->settings_loaded = true;
 	}
+	data->save_counter = 0;
 #endif /* CONFIG_SETTINGS */
 
 	data->dwork.dev = dev;
