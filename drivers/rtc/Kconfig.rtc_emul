@@ -1,6 +1,0 @@
-config RTC_EMUL_SAVE_PERIOD_SEC
-	int "RTC emulation periodic save period (seconds)"
-	default 60
-	help
-	  Set the period in seconds for how often the emulated RTC time is saved
-	  to persistent storage. A value of 0 disables periodic saving.
