@@ -151,7 +151,9 @@ static int lps22hh_mode_set(const struct device *dev, uint8_t mode)
 
 	lps22hh_odr_t odr;
 
-	lps22hh_data_rate_get(ctx, &odr);
+	if (lps22hh_data_rate_get(ctx, &odr)) {
+		return -EIO;
+	}
 
 	if (mode == LPS22HH_MODE_LOW_NOISE) {
 		odr |= 0x10;
@@ -175,7 +177,7 @@ static int lps22hh_set_int_s(stmdev_ctx_t *ctx, uint8_t int_s)
 		ret = lps22hh_write_reg(ctx, LPS22HH_CTRL_REG3, (uint8_t *)&ctrl_reg3, 1);
 	}
 
-	return 0;
+	return ret;
 }
 
 static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
@@ -189,55 +191,68 @@ static int lps22hh_threshold_set(const struct device *dev, uint16_t threshold)
 	ret = lps22hh_pressure_snap_set(ctx, 1);
 	if (ret != 0) {
 		LOG_ERR("Can't set AUTOREFP");
+		return ret;
 	}
 
 	/* Enable DIFF_EN, PLE, PHE */
 	ret = lps22hh_int_on_threshold_set(ctx, LPS22HH_BOTH);
 	if (ret != 0) {
 		LOG_ERR("Can't set DIFF_EN");
+		return ret;
 	}
 
 	/* set threshold */
 	ret = lps22hh_int_threshold_set(ctx, threshold);
 	if (ret != 0) {
 		LOG_ERR("Can't set threshold");
+		return ret;
 	}
 
 	/* set interrupt */
-	lps22hh_pin_int_route_get(ctx, &int_route);
+	ret = lps22hh_pin_int_route_get(ctx, &int_route);
+	if (ret != 0) {
+		LOG_ERR("Can't get int route");
+		return ret;
+	}
 	int_route.drdy_pres = 0;
-	lps22hh_pin_int_route_set(ctx, &int_route);
+	ret = lps22hh_pin_int_route_set(ctx, &int_route);
+	if (ret != 0) {
+		LOG_ERR("Can't set int route");
+		return ret;
+	}
 
 	ret = lps22hh_set_int_s(ctx, LPS22HH_BOTH);
 	if (ret != 0) {
 		LOG_ERR("Can't set interrupt source");
 	}
 
-	return 0;
+	return ret;
 }
 
 static int lps22hh_threshold_unset(const struct device *dev)
 {
 	const struct lps22hh_config *const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
-	lps22hh_pin_int_route_t int_route;
 	int32_t ret;
 
 	/* Unset AUTOREFP */
 	ret = lps22hh_pressure_snap_set(ctx, 0);
 	if (ret != 0) {
 		LOG_ERR("Cannot unset AUTOREFP");
+		return ret;
 	}
 
 	/* Unset threshold and diff_en */
 	ret = lps22hh_int_on_threshold_set(ctx, LPS22HH_NO_THRESHOLD);
 	if (ret != 0) {
 		LOG_ERR("Can't set DIFF_EN");
+		return ret;
 	}
 
 	ret = lps22hh_set_int_s(ctx, LPS22HH_NO_THRESHOLD);
 	if (ret != 0) {
 		LOG_ERR("Can't set interrupt source");
+		return ret;
 	}
 
 	return 0;
@@ -346,7 +361,11 @@ static int lps22hh_init_chip(const struct device *dev)
 #endif
 
 	/* reset registers */
-	lps22hh_reset_set(ctx, 1);
+	ret = lps22hh_reset_set(ctx, 1);
+	if (ret < 0) {
+		LOG_ERR("%s: Failed to reset %d", dev->name, ret);
+		return ret;
+	}
 
 	/* set sensor default odr */
 	LOG_DBG("%s: odr: %d", dev->name, cfg->odr);
@@ -356,7 +375,8 @@ static int lps22hh_init_chip(const struct device *dev)
 		return ret;
 	}
 
-	if (lps22hh_block_data_update_set(ctx, PROPERTY_ENABLE) < 0) {
+	ret = lps22hh_block_data_update_set(ctx, PROPERTY_ENABLE);
+	if (ret < 0) {
 		LOG_ERR("%s: Failed to set BDU", dev->name);
 		return ret;
 	}
