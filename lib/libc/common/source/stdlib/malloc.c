@@ -306,7 +306,7 @@ void free(void *ptr)
 	malloc_unlock();
 }
 
-void get_libc_heap_info(struct sys_memory_stats *stats)
+int get_libc_heap_info(struct sys_memory_stats *stats)
 {
 	return sys_heap_runtime_stats_get(&z_malloc_heap, stats);
 }
