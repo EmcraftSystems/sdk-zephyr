@@ -65,6 +65,8 @@ LOG_MODULE_REGISTER(bq274xx, CONFIG_SENSOR_LOG_LEVEL);
 /* For temperature conversion */
 #define KELVIN_OFFSET 273.15
 
+#define BQ274XX_STATUS_SS (1 << (8+5))
+
 static const struct bq274xx_regs bq27421_regs = {
 	.dm_design_capacity = 10,
 	.dm_design_energy = 12,
@@ -116,23 +118,39 @@ static int bq274xx_ctrl_reg_write(const struct device *dev, uint16_t subcommand)
 	return 0;
 }
 
-static int bq274xx_get_device_type(const struct device *dev, uint16_t *val)
+static int bq274xx_ctrl_reg_read(const struct device *dev, uint16_t reg, uint16_t *val)
 {
 	int ret;
 
-	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_DEVICE_TYPE);
+	ret = bq274xx_ctrl_reg_write(dev, reg);
 	if (ret < 0) {
-		LOG_ERR("Unable to write control register");
+		LOG_ERR("Unable to write control register (%04X)", reg);
 		return -EIO;
 	}
 
 	ret = bq274xx_cmd_reg_read(dev, BQ274XX_CMD_CONTROL, val);
 	if (ret < 0) {
-		LOG_ERR("Unable to read register");
+		LOG_ERR("Unable to read control register (%04X)", reg);
 		return -EIO;
 	}
 
 	return 0;
+}
+
+static int bq274xx_get_device_type(const struct device *dev, uint16_t *val)
+{
+	return bq274xx_ctrl_reg_read(dev, BQ274XX_CTRL_DEVICE_TYPE, val);
+}
+
+static int bq274xx_get_status(const struct device *dev, uint16_t *status)
+{
+	int ret;
+
+	ret = bq274xx_ctrl_reg_read(dev, BQ274XX_CTRL_STATUS, status);
+	if (ret < 0) {
+		LOG_ERR("Unable to read status");
+	}
+	return ret;
 }
 
 static int bq274xx_read_block(const struct device *dev,
@@ -253,15 +271,7 @@ static int bq274xx_mode_cfgupdate(const struct device *dev, bool enabled)
 	if (try >= BQ274XX_CFGUP_MAX_TRIES) {
 		uint16_t status;
 
-		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_STATUS);
-		if (ret < 0) {
-			LOG_ERR("Unable to write control register(status)");
-		}
-
-		ret = bq274xx_cmd_reg_read(dev, BQ274XX_CMD_CONTROL, &status);
-		if (ret < 0) {
-			LOG_ERR("Unable to read register(status)");
-		}
+		ret = bq274xx_get_status(dev, &status);
 		LOG_WRN("Config mode timeout, enabled: %d, flags: %04x status: %04x", enabled,
 			flags, status);
 		return -EIO;
@@ -275,7 +285,7 @@ static int bq274xx_mode_cfgupdate(const struct device *dev, bool enabled)
  * The details are currently only documented in the TI E2E support forum:
  * https://e2e.ti.com/support/power-management-group/power-management/f/power-management-forum/1215460/bq27427evm-misbehaving-stateofcharge
  */
-static int bq27427_ccgain_quirk(const struct device *dev)
+static int bq27427_ccgain_quirk(const struct device *dev, bool canwrite, bool *changed)
 {
 	const struct bq274xx_config *const config = dev->config;
 	int ret;
@@ -304,6 +314,11 @@ static int bq27427_ccgain_quirk(const struct device *dev)
 
 	if (!(val & BQ27427_CC_GAIN_SIGN_BIT)) {
 		LOG_DBG("bq27427 quirk already applied");
+		*changed = false;
+		return 0;
+	}
+	*changed = true;
+	if (!canwrite) {
 		return 0;
 	}
 
@@ -349,13 +364,7 @@ static int bq274xx_ensure_chemistry(const struct device *dev)
 	int ret;
 	uint16_t val;
 
-	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_CHEM_ID);
-	if (ret < 0) {
-		LOG_ERR("Unable to write control register");
-		return -EIO;
-	}
-
-	ret = bq274xx_cmd_reg_read(dev, BQ274XX_CMD_CONTROL, &val);
+	ret = bq274xx_ctrl_reg_read(dev, BQ274XX_CTRL_CHEM_ID, &val);
 	if (ret < 0) {
 		LOG_ERR("Unable to read register");
 		return -EIO;
@@ -400,6 +409,31 @@ static int bq274xx_ensure_chemistry(const struct device *dev)
 	return 0;
 }
 
+static int bq274xx_unseal(const struct device *dev)
+{
+	int ret;
+	uint16_t status;
+
+	ret = bq274xx_get_status(dev, &status);
+	if (ret < 0) {
+		return ret;
+	}
+	if (status & BQ274XX_STATUS_SS) {
+		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_A);
+		if (ret < 0) {
+			LOG_ERR("Unable to unseal (A) the battery");
+			return -EIO;
+		}
+
+		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_B);
+		if (ret < 0) {
+			LOG_ERR("Unable to unseal (B) the battery");
+			return -EIO;
+		}
+	}
+	return ret;
+}
+
 static int bq274xx_gauge_configure(const struct device *dev)
 {
 	const struct bq274xx_config *const config = dev->config;
@@ -409,48 +443,20 @@ static int bq274xx_gauge_configure(const struct device *dev)
 	uint16_t designenergy_mwh, taperrate;
 	uint8_t block[BQ27XXX_DM_SZ];
 	bool block_modified = false;
+	bool quirk_modified = false;
 
 	designenergy_mwh = (uint32_t)config->design_capacity * 37 / 10; /* x3.7 */
 	taperrate = config->design_capacity * 10 / config->taper_current;
 
-	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_A);
+	ret = bq274xx_unseal(dev);
 	if (ret < 0) {
-		LOG_ERR("Unable to unseal the battery");
+		LOG_ERR("Failed to UNSEAL");
 		return -EIO;
 	}
 
-	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_B);
-	if (ret < 0) {
-		LOG_ERR("Unable to unseal the battery");
-		return -EIO;
-	}
-
-	ret = bq274xx_mode_cfgupdate(dev, true);
-	if (ret < 0) {
-		/* We observed a failure to enter the CONFIG UPDATE mode
-		 * just after exiting the CONFIG UPDATE mode.
-		 * This can happen when the device initialization starts
-		 * for the second time after unexpected board reset.
-		 * The below operations seem to recover from this error.
-		 */
-		LOG_WRN("Attempt to recover");
-
-		k_sleep(K_MSEC(2000));
-
-		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_A);
-		if (ret < 0) {
-			LOG_ERR("Unable to unseal the battery");
-			return -EIO;
-		}
-
-		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_B);
-		if (ret < 0) {
-			LOG_ERR("Unable to unseal the battery");
-			return -EIO;
-		}
-
-		/* Try again entering the CONFIG UPDATE mode */
-		ret = bq274xx_mode_cfgupdate(dev, true);
+	if (data->regs == &bq27427_regs) {
+		/* Only check, write below */
+		ret = bq27427_ccgain_quirk(dev, false, &quirk_modified);
 		if (ret < 0) {
 			return ret;
 		}
@@ -480,19 +486,69 @@ static int bq274xx_gauge_configure(const struct device *dev)
 			     regs->dm_taper_rate, taperrate,
 			     &block_modified);
 
-	if (block_modified) {
-		LOG_INF("bq274xx: updating fuel gauge parameters");
-
-		ret = bq274xx_write_block(dev, block, sizeof(block));
+	if (block_modified || quirk_modified) {
+		ret = bq274xx_mode_cfgupdate(dev, true);
 		if (ret < 0) {
-			return ret;
+			/* We observed a failure to enter the CONFIG UPDATE mode
+			 * just after exiting the CONFIG UPDATE mode.
+			 * This can happen when the device initialization starts
+			 * for the second time after unexpected board reset.
+			 * The below operations seem to recover from this error.
+			 */
+			LOG_WRN("Attempt to recover");
+
+			k_sleep(K_MSEC(2000));
+
+			ret = bq274xx_unseal(dev);
+			if (ret < 0) {
+				return -EIO;
+			}
+
+			/* Try again entering the CONFIG UPDATE mode */
+			ret = bq274xx_mode_cfgupdate(dev, true);
+			if (ret < 0) {
+				return ret;
+			}
 		}
-	}
 
-	if (data->regs == &bq27427_regs) {
-		ret = bq27427_ccgain_quirk(dev);
+		if (block_modified) {
+			LOG_INF("bq274xx: updating fuel gauge parameters");
+
+			ret = bq274xx_write_block(dev, block, sizeof(block));
+			if (ret < 0) {
+				return ret;
+			}
+		}
+
+		if (quirk_modified) { /* can only be set for bq27427 */
+			ret = bq27427_ccgain_quirk(dev, true, &quirk_modified);
+			if (ret < 0) {
+				return ret;
+			}
+		}
+		ret = bq274xx_mode_cfgupdate(dev, false);
 		if (ret < 0) {
-			return ret;
+			LOG_ERR("Failed to exit CONFIG UPDATE mode, attempting recovery");
+
+			/* Recovery for exit CONFIG UPDATE mode failure */
+			k_sleep(K_MSEC(1000));
+
+			/* Try soft reset to recover from stuck state */
+			ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SOFT_RESET);
+			if (ret < 0) {
+				LOG_ERR("Soft reset failed during exit recovery");
+				return -EIO;
+			}
+
+			/* Wait for reset to complete */
+			k_sleep(K_MSEC(500));
+
+			/* Try exiting CONFIG UPDATE mode again */
+			ret = bq274xx_mode_cfgupdate(dev, false);
+			if (ret < 0) {
+				LOG_ERR("Exit CONFIG UPDATE mode recovery failed");
+				return ret;
+			}
 		}
 	}
 
@@ -501,30 +557,6 @@ static int bq274xx_gauge_configure(const struct device *dev)
 		return ret;
 	}
 
-	ret = bq274xx_mode_cfgupdate(dev, false);
-	if (ret < 0) {
-		LOG_ERR("Failed to exit CONFIG UPDATE mode, attempting recovery");
-
-		/* Recovery for exit CONFIG UPDATE mode failure */
-		k_sleep(K_MSEC(1000));
-
-		/* Try soft reset to recover from stuck state */
-		ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SOFT_RESET);
-		if (ret < 0) {
-			LOG_ERR("Soft reset failed during exit recovery");
-			return -EIO;
-		}
-
-		/* Wait for reset to complete */
-		k_sleep(K_MSEC(500));
-
-		/* Try exiting CONFIG UPDATE mode again */
-		ret = bq274xx_mode_cfgupdate(dev, false);
-		if (ret < 0) {
-			LOG_ERR("Exit CONFIG UPDATE mode recovery failed");
-			return ret;
-		}
-	}
 
 	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SEALED);
 	if (ret < 0) {
@@ -803,9 +835,13 @@ static int bq274xx_gauge_init(const struct device *dev)
 
 	if (!config->lazy_loading) {
 		ret = bq274xx_gauge_configure(dev);
+		if (ret < 0) {
+			LOG_ERR("Unable to configure, delaying...");
+			/* allow to recover later */
+		}
 	}
 
-	return ret;
+	return 0;
 }
 
 #ifdef CONFIG_BQ274XX_PM
@@ -813,15 +849,8 @@ static int bq274xx_enter_shutdown_mode(const struct device *dev)
 {
 	int ret;
 
-	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_A);
+	ret = bq274xx_unseal(dev);
 	if (ret < 0) {
-		LOG_ERR("Unable to unseal the battery");
-		return ret;
-	}
-
-	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_UNSEAL_KEY_B);
-	if (ret < 0) {
-		LOG_ERR("Unable to unseal the battery");
 		return ret;
 	}
 
@@ -877,7 +906,8 @@ static int bq274xx_exit_shutdown_mode(const struct device *dev)
 		ret = bq274xx_gauge_configure(dev);
 		if (ret < 0) {
 			LOG_ERR("Unable to configure bq274xx gauge");
-			return ret;
+			/* allow to recover later */
+			/* return ret; */
 		}
 	}
 
