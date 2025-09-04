@@ -619,6 +619,9 @@ static void work_queue_main(void *workq_ptr, void *p2, void *p3)
 	ARG_UNUSED(p3);
 
 	struct k_work_q *queue = (struct k_work_q *)workq_ptr;
+#if CONFIG_SYSTEM_WORKQUEUE_PROFILE_THRESHOLD > 0
+	int64_t ts, delta;
+#endif
 
 	while (true) {
 		sys_snode_t *node;
@@ -685,7 +688,19 @@ static void work_queue_main(void *workq_ptr, void *p2, void *p3)
 		k_spin_unlock(&lock, key);
 
 		__ASSERT_NO_MSG(handler != NULL);
+#if CONFIG_SYSTEM_WORKQUEUE_PROFILE_THRESHOLD > 0
+		ts = k_uptime_get();
+#endif
 		handler(work);
+#if CONFIG_SYSTEM_WORKQUEUE_PROFILE_THRESHOLD > 0
+		if (queue == &k_sys_work_q) {
+			delta = k_uptime_delta(&ts);
+			if (delta > CONFIG_SYSTEM_WORKQUEUE_PROFILE_THRESHOLD) {
+				printk("%s: sysworkq delay: %lld, work fn: %p\n",
+						CONFIG_BOARD_QUALIFIERS, delta, (void *)handler);
+			}
+		}
+#endif
 
 		/* Mark the work item as no longer running and deal
 		 * with any cancellation and flushing issued while it

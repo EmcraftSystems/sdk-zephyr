@@ -585,6 +585,14 @@ config SYSTEM_WORKQUEUE_NO_YIELD
 	  cooperative and a sequence of work items is expected to complete
 	  without yielding.
 
+config SYSTEM_WORKQUEUE_PROFILE_THRESHOLD
+	int "Enable profiling of work items running on the system work queue"
+	default 0
+	help
+	  Enable profiling of work items running from the system work queue, and
+	  report those items, whose execution time crosses the milliseconds
+	  threshold defined by this option.
+
 endmenu
 
 menu "Barrier Operations"
