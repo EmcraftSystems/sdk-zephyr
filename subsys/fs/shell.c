@@ -216,6 +216,8 @@ static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
 	char path[MAX_PATH_LEN];
 	struct fs_dir_t dir;
 	int err;
+	int fcnt = 0;
+	int dcnt = 0;
 
 	if (argc < 2) {
 		strncpy(path, cwd, sizeof(path));
@@ -250,7 +252,15 @@ static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
 				(entry.type == FS_DIR_ENTRY_DIR) ? "d" : "-",
 				entry.size, entry.name,
 				(entry.type == FS_DIR_ENTRY_DIR) ? "/" : "");
+
+		if (entry.type == FS_DIR_ENTRY_DIR) {
+			dcnt++;
+		} else {
+			fcnt++;
+		}
 	}
+
+	shell_print(sh, "Records total: %d, dirs: %d, files: %d", dcnt + fcnt, dcnt, fcnt);
 
 	fs_closedir(&dir);
 
