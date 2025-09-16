@@ -122,6 +122,9 @@ struct bq274xx_config {
 	uint16_t design_capacity;
 	uint16_t taper_current;
 	uint16_t terminate_voltage;
+	uint16_t dsg_cur_thres;
+	uint16_t chg_cur_thres;
+	uint16_t quit_cur_thres;
 #if defined(CONFIG_BQ274XX_PM) || defined(CONFIG_BQ274XX_TRIGGER)
 	struct gpio_dt_spec int_gpios;
 #endif

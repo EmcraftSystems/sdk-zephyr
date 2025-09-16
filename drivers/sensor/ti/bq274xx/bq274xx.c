@@ -60,7 +60,12 @@ LOG_MODULE_REGISTER(bq274xx, CONFIG_SENSOR_LOG_LEVEL);
 
 /* Subclasses */
 #define BQ274XX_SUBCLASS_82 82
+#define BQ274XX_SUBCLASS_81  81
 #define BQ274XX_SUBCLASS_105 105
+
+#define BQ27XXX_OFFSET_DSG_CUR  0
+#define BQ27XXX_OFFSET_CHG_CUR  2
+#define BQ27XXX_OFFSET_QUIT_CUR 4
 
 /* For temperature conversion */
 #define KELVIN_OFFSET 273.15
@@ -153,27 +158,38 @@ static int bq274xx_get_status(const struct device *dev, uint16_t *status)
 	return ret;
 }
 
-static int bq274xx_read_block(const struct device *dev,
-			      uint8_t subclass,
-			      uint8_t *block, uint8_t num_bytes)
+static int bq274xx_set_data_addr(const struct device *dev, uint8_t subclass, uint8_t page)
 {
 	const struct bq274xx_config *const config = dev->config;
 	int ret;
 
 	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_CLASS, subclass);
 	if (ret < 0) {
-		LOG_ERR("Failed to update state subclass");
+		LOG_ERR("Failed to update state subclass %d", subclass);
 		return -EIO;
 	}
 
 	/* DataBlock(), 0 for the first 32 bytes. */
-	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_BLOCK, 0x00);
+	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_BLOCK, page);
 	if (ret < 0) {
-		LOG_ERR("Failed to update block offset");
+		LOG_ERR("Failed to update block offset %u", page);
 		return -EIO;
 	}
 
 	k_sleep(BQ274XX_SUBCLASS_DELAY);
+	return 0;
+}
+
+static int bq274xx_read_block(const struct device *dev, uint8_t subclass, uint8_t page,
+			      uint8_t *block, uint8_t num_bytes)
+{
+	const struct bq274xx_config *const config = dev->config;
+	int ret;
+
+	ret = bq274xx_set_data_addr(dev, subclass, page);
+	if (ret < 0) {
+		return -EIO;
+	}
 
 	ret = i2c_burst_read_dt(&config->i2c, BQ274XX_EXT_BLKDAT_START, block, num_bytes);
 	if (ret < 0) {
@@ -184,7 +200,7 @@ static int bq274xx_read_block(const struct device *dev,
 	return 0;
 }
 
-static int bq274xx_write_block(const struct device *dev,
+static int bq274xx_write_block(const struct device *dev, uint8_t subclass, uint8_t page,
 			       uint8_t *block, uint8_t num_bytes)
 {
 	const struct bq274xx_config *const config = dev->config;
@@ -193,6 +209,11 @@ static int bq274xx_write_block(const struct device *dev,
 	uint8_t buf[1 + BQ27XXX_DM_SZ];
 
 	__ASSERT_NO_MSG(num_bytes <= BQ27XXX_DM_SZ);
+
+	ret = bq274xx_set_data_addr(dev, subclass, page);
+	if (ret < 0) {
+		return -EIO;
+	}
 
 	buf[0] = BQ274XX_EXT_BLKDAT_START;
 	memcpy(&buf[1], block, num_bytes);
@@ -291,20 +312,10 @@ static int bq27427_ccgain_quirk(const struct device *dev, bool canwrite, bool *c
 	int ret;
 	uint8_t val, checksum;
 
-	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_CLASS,
-				    BQ274XX_SUBCLASS_105);
+	ret = bq274xx_set_data_addr(dev, BQ274XX_SUBCLASS_105, 0);
 	if (ret < 0) {
-		LOG_ERR("Failed to update state subclass");
 		return -EIO;
 	}
-
-	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_BLOCK, 0x00);
-	if (ret < 0) {
-		LOG_ERR("Failed to update block offset");
-		return -EIO;
-	}
-
-	k_sleep(BQ274XX_SUBCLASS_DELAY);
 
 	ret = i2c_reg_read_byte_dt(&config->i2c, BQ27427_CC_GAIN, &val);
 	if (ret < 0) {
@@ -441,16 +452,52 @@ static int bq274xx_gauge_configure(const struct device *dev)
 	const struct bq274xx_regs *regs = data->regs;
 	int ret;
 	uint16_t designenergy_mwh, taperrate;
-	uint8_t block[BQ27XXX_DM_SZ];
-	bool block_modified = false;
+	uint16_t chg_cur_thres = 0, dsg_cur_thres = 0, quit_cur_thres = 0;
+	uint8_t block_82[BQ27XXX_DM_SZ];
+	uint8_t block_81[BQ27XXX_DM_SZ];
+	bool block_82_modified = false;
+	bool block_81_modified = false;
 	bool quirk_modified = false;
 
 	designenergy_mwh = (uint32_t)config->design_capacity * 37 / 10; /* x3.7 */
 	taperrate = config->design_capacity * 10 / config->taper_current;
 
+	if (config->dsg_cur_thres > 0) {
+		dsg_cur_thres = config->design_capacity * 10 / (uint32_t)config->dsg_cur_thres;
+		if (dsg_cur_thres > 2000) {
+			LOG_WRN("Dsg Current Threshold clamped to %u",
+				config->design_capacity / 2000);
+			dsg_cur_thres = 2000;
+		}
+	}
+
+	if (config->chg_cur_thres > 0) {
+		chg_cur_thres = config->design_capacity * 10 / (uint32_t)config->chg_cur_thres;
+		if (chg_cur_thres > 2000) {
+			LOG_WRN("Dsg Current Threshold clamped to %u",
+				config->design_capacity / 2000);
+			chg_cur_thres = 2000;
+		}
+	}
+
+	if (config->quit_cur_thres > 0) {
+		quit_cur_thres = config->design_capacity * 10 / (uint32_t)config->quit_cur_thres;
+		if (quit_cur_thres > 2000) {
+			LOG_WRN("Dsg Current Threshold clamped to %u",
+				config->design_capacity / 1000);
+			quit_cur_thres = 2000;
+		}
+	}
+
 	ret = bq274xx_unseal(dev);
 	if (ret < 0) {
 		LOG_ERR("Failed to UNSEAL");
+		return -EIO;
+	}
+
+	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_CONTROL, 0x00);
+	if (ret < 0) {
+		LOG_ERR("Failed to enable block data memory");
 		return -EIO;
 	}
 
@@ -462,31 +509,38 @@ static int bq274xx_gauge_configure(const struct device *dev)
 		}
 	}
 
-	ret = i2c_reg_write_byte_dt(&config->i2c, BQ274XX_EXT_DATA_CONTROL, 0x00);
-	if (ret < 0) {
-		LOG_ERR("Failed to enable block data memory");
-		return -EIO;
-	}
-
-	ret = bq274xx_read_block(dev, BQ274XX_SUBCLASS_82, block, sizeof(block));
+	ret = bq274xx_read_block(dev, BQ274XX_SUBCLASS_81, 0, block_81, sizeof(block_81));
 	if (ret < 0) {
 		return ret;
 	}
 
-	bq274xx_update_block(block,
-			     regs->dm_design_capacity, config->design_capacity,
-			     &block_modified);
-	bq274xx_update_block(block,
-			     regs->dm_design_energy, designenergy_mwh,
-			     &block_modified);
-	bq274xx_update_block(block,
-			     regs->dm_terminate_voltage, config->terminate_voltage,
-			     &block_modified);
-	bq274xx_update_block(block,
-			     regs->dm_taper_rate, taperrate,
-			     &block_modified);
+	if (config->dsg_cur_thres > 0) {
+		bq274xx_update_block(block_81, BQ27XXX_OFFSET_DSG_CUR, dsg_cur_thres,
+				     &block_81_modified);
+	}
+	if (config->chg_cur_thres > 0) {
+		bq274xx_update_block(block_81, BQ27XXX_OFFSET_CHG_CUR, chg_cur_thres,
+				     &block_81_modified);
+	}
+	if (config->quit_cur_thres > 0) {
+		bq274xx_update_block(block_81, BQ27XXX_OFFSET_QUIT_CUR, quit_cur_thres,
+				     &block_81_modified);
+	}
 
-	if (block_modified || quirk_modified) {
+	ret = bq274xx_read_block(dev, BQ274XX_SUBCLASS_82, 0, block_82, sizeof(block_82));
+	if (ret < 0) {
+		return ret;
+	}
+
+	bq274xx_update_block(block_82, regs->dm_design_capacity, config->design_capacity,
+			     &block_82_modified);
+	bq274xx_update_block(block_82, regs->dm_design_energy, designenergy_mwh,
+			     &block_82_modified);
+	bq274xx_update_block(block_82, regs->dm_terminate_voltage, config->terminate_voltage,
+			     &block_82_modified);
+	bq274xx_update_block(block_82, regs->dm_taper_rate, taperrate, &block_82_modified);
+
+	if (block_82_modified || block_81_modified || quirk_modified) {
 		ret = bq274xx_mode_cfgupdate(dev, true);
 		if (ret < 0) {
 			/* We observed a failure to enter the CONFIG UPDATE mode
@@ -511,10 +565,21 @@ static int bq274xx_gauge_configure(const struct device *dev)
 			}
 		}
 
-		if (block_modified) {
+		if (block_82_modified) {
 			LOG_INF("bq274xx: updating fuel gauge parameters");
 
-			ret = bq274xx_write_block(dev, block, sizeof(block));
+			ret = bq274xx_write_block(dev, BQ274XX_SUBCLASS_82, 0, block_82,
+						  sizeof(block_82));
+			if (ret < 0) {
+				return ret;
+			}
+		}
+
+		if (block_81_modified) {
+			LOG_INF("bq274xx: updating current threshold parameters");
+
+			ret = bq274xx_write_block(dev, BQ274XX_SUBCLASS_81, 0, block_81,
+						  sizeof(block_81));
 			if (ret < 0) {
 				return ret;
 			}
@@ -955,28 +1020,28 @@ static const struct sensor_driver_api bq274xx_battery_driver_api = {
 #define PM_BQ274XX_DT_INST_GET(index) NULL
 #endif
 
-#define BQ274XX_INIT(index)							\
-	static struct bq274xx_data bq274xx_driver_##index;			\
-										\
-	static const struct bq274xx_config bq274xx_config_##index = {		\
-		.i2c = I2C_DT_SPEC_INST_GET(index),				\
-		BQ274XX_INT_CFG(index)						\
-		.design_voltage = DT_INST_PROP(index, design_voltage),		\
-		.design_capacity = DT_INST_PROP(index, design_capacity),	\
-		.taper_current = DT_INST_PROP(index, taper_current),		\
-		.terminate_voltage = DT_INST_PROP(index, terminate_voltage),	\
-		.chemistry_id = DT_INST_PROP_OR(index, chemistry_id, 0),			\
-		.lazy_loading = DT_INST_PROP(index, zephyr_lazy_load),		\
-		.report_unfiltered_soc = DT_INST_PROP(index, report_unfiltered_soc),		\
-	};									\
-										\
-	PM_BQ274XX_DT_INST_DEFINE(index, bq274xx_pm_action);			\
-										\
-	SENSOR_DEVICE_DT_INST_DEFINE(index, &bq274xx_gauge_init,		\
-			    PM_BQ274XX_DT_INST_GET(index),			\
-			    &bq274xx_driver_##index,				\
-			    &bq274xx_config_##index, POST_KERNEL,		\
-			    CONFIG_SENSOR_INIT_PRIORITY,			\
-			    &bq274xx_battery_driver_api);
+#define BQ274XX_INIT(index)                                                                        \
+	static struct bq274xx_data bq274xx_driver_##index;                                         \
+                                                                                                   \
+	static const struct bq274xx_config bq274xx_config_##index = {                              \
+		.i2c = I2C_DT_SPEC_INST_GET(index),                                                \
+		BQ274XX_INT_CFG(index).design_voltage = DT_INST_PROP(index, design_voltage),       \
+		.design_capacity = DT_INST_PROP(index, design_capacity),                           \
+		.taper_current = DT_INST_PROP(index, taper_current),                               \
+		.terminate_voltage = DT_INST_PROP(index, terminate_voltage),                       \
+		.dsg_cur_thres = DT_INST_PROP_OR(index, dsg_current_threshold, 0),                 \
+		.chg_cur_thres = DT_INST_PROP_OR(index, chg_current_threshold, 0),                 \
+		.quit_cur_thres = DT_INST_PROP_OR(index, quit_current_threshold, 0),               \
+		.chemistry_id = DT_INST_PROP_OR(index, chemistry_id, 0),                           \
+		.lazy_loading = DT_INST_PROP(index, zephyr_lazy_load),                             \
+		.report_unfiltered_soc = DT_INST_PROP(index, report_unfiltered_soc),               \
+	};                                                                                         \
+                                                                                                   \
+	PM_BQ274XX_DT_INST_DEFINE(index, bq274xx_pm_action);                                       \
+                                                                                                   \
+	SENSOR_DEVICE_DT_INST_DEFINE(index, &bq274xx_gauge_init, PM_BQ274XX_DT_INST_GET(index),    \
+				     &bq274xx_driver_##index, &bq274xx_config_##index,             \
+				     POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY,                     \
+				     &bq274xx_battery_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(BQ274XX_INIT)

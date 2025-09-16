@@ -35,6 +35,24 @@ properties:
       Minimum operating voltage of your system. This is the target where the
       gauge typically reports 0% capacity. In mV.
 
+  dsg-current-threshold:
+    type: int
+    description: |
+      The value of the Dsg Current Threshold. When zero or absent, the driver
+      will not check the register. In mA.
+
+  chg-current-threshold:
+    type: int
+    description: |
+      The value of the Chg Current Threshold. When zero or absent, the driver
+      will not check the register. In mA.
+
+  quit-current-threshold:
+    type: int
+    description: |
+      The value of the Quit Current Threshold. When zero or absent, the driver
+      will not check the register. In mA.
+
   chemistry-id:
     type: int
     description: |
