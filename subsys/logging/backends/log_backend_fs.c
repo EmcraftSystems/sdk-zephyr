@@ -72,57 +72,6 @@ static char fname[MAX_PATH_LEN];
 static uint32_t current_boot_number;
 static int64_t current_boot_start_uptime;
 static int64_t last_rotation_time;
-
-/**
- * Log file metadata
- */
-struct file_metadata {
-	int64_t uptime;
-	uint32_t boot_num;
-};
-
-/**
- * Get log file metadata
- */
-static int get_log_file_metadata(struct fs_dirent *ent, struct file_metadata *meta)
-{
-	char *ptr;
-	size_t prefix_len = strlen(CONFIG_LOG_BACKEND_FS_FILE_PREFIX);
-
-	if (ent->type != FS_DIR_ENTRY_FILE) {
-		return -1;
-	}
-
-	/* Expected format: prefix_bootnum_uptime */
-	if (strlen(ent->name) < prefix_len + BOOT_NUM_LEN + 1 + UPTIME_LEN) {
-		return -1;
-	}
-
-	if (memcmp(ent->name, CONFIG_LOG_BACKEND_FS_FILE_PREFIX, prefix_len) != 0) {
-		return -1;
-	}
-
-	/* Find first underscore after prefix */
-	ptr = ent->name + prefix_len;
-	if (!ptr) {
-		return -1;
-	}
-
-	/* Parse boot number */
-	meta->boot_num = atoi(ptr);
-
-	/* Find second underscore */
-	ptr = strchr(ptr + 1, '_');
-	if (!ptr) {
-		return -1;
-	}
-
-	/* Parse uptime */
-	meta->uptime = atoll(ptr + 1);
-
-	return 0;
-}
-
 #else
 static int get_log_file_id(struct fs_dirent *ent);
 #endif
@@ -512,7 +461,10 @@ static int allocate_new_file(struct fs_file_t *file)
 		}
 
 		while (file_ctr >= CONFIG_LOG_BACKEND_FS_FILES_LIMIT) {
-			del_oldest_log();
+			rc = del_oldest_log();
+			if (rc) {
+				goto out;
+			}
 		}
 
 		current_boot_number = determine_boot_number();
@@ -695,24 +647,6 @@ out:
 	return rc;
 }
 
-#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
-/* Delete log by boot number and uptime */
-static int del_log_by_num(int boot_num, int64_t uptime)
-{
-	int rc = 0;
-
-	rc = snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
-		      CONFIG_LOG_BACKEND_FS_FILE_PREFIX, boot_num, uptime);
-	if (rc < 0) {
-		return rc;
-	}
-
-	rc = fs_unlink(fname);
-
-	return rc;
-}
-#endif
-
 static uint64_t get_logs_duration(void)
 {
 	uint64_t session_start_time = -1, session_end_time = -1;
@@ -764,11 +698,6 @@ static int del_oldest_log(void)
 		}
 	}
 #else
-	struct fs_dir_t dir;
-	struct fs_dirent ent;
-	struct file_metadata meta;
-	uint64_t min_ts = -1;
-	uint32_t min_bid = -1;
 	char fname[MAX_PATH_LEN];
 	struct file_list_item *item;
 
@@ -777,48 +706,15 @@ static int del_oldest_log(void)
 		sprintf(fname, "%s%s%04u_%010llu", CONFIG_LOG_BACKEND_FS_DIR,
 			CONFIG_LOG_BACKEND_FS_FILE_PREFIX, item->bid, item->ts);
 		rc = fs_unlink(fname);
-		if (rc) {
-			printf("%s: cannot unlink %s\n", __func__, fname);
-		} else {
 
+		if (rc) {
+			printf("%s: cannot unlink %s (rc = %d)\n", __func__, fname, rc);
+		} else {
 			sys_slist_find_and_remove(&file_list, &item->node);
 			k_free(item);
 			file_ctr--;
 		}
 	}
-
-	return !rc;
-
-	fs_dir_t_init(&dir);
-
-	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
-	if (rc) {
-		return rc;
-	}
-
-	while (true) {
-		rc = fs_readdir(&dir, &ent);
-		if (rc < 0 || ent.name[0] == 0) {
-			break;
-		}
-
-		if (get_log_file_metadata(&ent, &meta) == 0) {
-			if (meta.boot_num < min_bid) {
-				min_bid = meta.boot_num;
-				min_ts = meta.uptime;
-			} else if (min_bid == meta.boot_num && meta.uptime < min_ts) {
-				min_ts = meta.uptime;
-			}
-		}
-	}
-
-	rc = del_log_by_num(min_bid, min_ts);
-
-	if (!rc) {
-		--file_ctr;
-	}
-
-	(void)fs_closedir(&dir);
 #endif
 	return rc;
 }
