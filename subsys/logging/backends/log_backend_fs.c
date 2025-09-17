@@ -18,12 +18,10 @@
 #define LOG_PREFIX_LEN       (sizeof(CONFIG_LOG_BACKEND_FS_FILE_PREFIX) - 1)
 
 #if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
-#define UPTIME_LEN		10
-#define BOOT_NUM_LEN		4
-#define LOG_FILE_MAX_AGE_MS	\
-	(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION_INTERVAL * 60 * 60 * 1000)
-#define NEW_FILE_INTERVAL_MS	\
-	(CONFIG_LOG_BACKEND_FS_MAX_FILE_TIME * 60 * 1000)
+#define UPTIME_LEN           10
+#define BOOT_NUM_LEN         4
+#define LOG_FILE_MAX_AGE_MS  (CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION_INTERVAL * 60 * 60 * 1000)
+#define NEW_FILE_INTERVAL_MS (CONFIG_LOG_BACKEND_FS_MAX_FILE_TIME * 60 * 1000)
 #else
 #define MAX_FILE_NUMERAL 9999
 #define FILE_NUMERAL_LEN 4
@@ -37,6 +35,14 @@ struct logfs_msg {
 };
 
 #define MSG_SIZE 4
+
+sys_slist_t file_list = SYS_SLIST_STATIC_INIT(&file_list);
+
+struct file_list_item {
+	sys_snode_t node;
+	uint32_t bid;
+	uint64_t ts;
+};
 
 K_MSGQ_DEFINE(log_msgq, sizeof(struct logfs_msg), MSG_SIZE, 1);
 K_THREAD_STACK_DEFINE(logfs_queue_stack_area, CONFIG_LOG_BACKEND_FS_STACK_SIZE);
@@ -189,6 +195,78 @@ static int create_log_dir(const char *path)
 	return rc;
 }
 
+static int file_list_add_item(uint32_t boot_id, uint64_t timestamp)
+{
+	struct file_list_item *item = k_malloc(sizeof(struct file_list_item));
+
+	if (!item) {
+		printf("%s: malloc error\n", __func__);
+		return -ENOMEM;
+	}
+
+	item->bid = boot_id;
+	item->ts = timestamp;
+
+	sys_slist_append(&file_list, &item->node);
+
+	return 0;
+}
+
+static int file_list_update(void)
+{
+	struct fs_dir_t dir;
+	struct fs_dirent ent;
+	uint32_t bid;
+	uint64_t ts;
+	int rc = 0;
+	int cnt = 0;
+
+	fs_dir_t_init(&dir);
+
+	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
+	if (rc) {
+		printf("%s: cannot open log dir\n", __func__);
+		return 0;
+	}
+
+	while (true) {
+		rc = fs_readdir(&dir, &ent);
+		if (rc < 0) {
+			break;
+		}
+		if (ent.name[0] == 0) {
+			break;
+		}
+
+		rc = sscanf(ent.name, "log.%u_%llu", &bid, &ts);
+		if (rc == 2 && !file_list_add_item(bid, ts)) {
+			cnt++;
+		}
+	}
+
+	(void)fs_closedir(&dir);
+	return cnt;
+}
+
+static struct file_list_item *file_list_get_oldest_file(void)
+{
+	struct file_list_item *pn;
+	struct file_list_item *cur = NULL;
+
+	cur = SYS_SLIST_PEEK_HEAD_CONTAINER(&file_list, cur, node);
+	if (cur == NULL) {
+		return NULL;
+	}
+
+	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
+		if ((pn->bid < cur->bid) || (pn->bid == cur->bid && pn->ts < cur->ts)) {
+			cur = pn;
+		}
+	}
+
+	return cur;
+}
+
 #if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
 static int check_log_file_exist(int num)
 {
@@ -257,8 +335,7 @@ int write_log_to_file(uint8_t *data, size_t length, void *ctx)
 
 			return length;
 		} else if ((size + length) > CONFIG_LOG_BACKEND_FS_FILE_SIZE ||
-				(k_uptime_get() - last_rotation_time) >
-				NEW_FILE_INTERVAL_MS) {
+			   (k_uptime_get() - last_rotation_time) > NEW_FILE_INTERVAL_MS) {
 
 			rc = allocate_new_file(f);
 
@@ -386,34 +463,14 @@ static int get_log_file_id(struct fs_dirent *ent)
  */
 static uint32_t determine_boot_number(void)
 {
-	struct fs_dir_t dir;
-	struct fs_dirent ent;
-	struct file_metadata meta;
 	uint32_t max_boot_num = 0;
-	int rc;
+	struct file_list_item *pn;
 
-	fs_dir_t_init(&dir);
-
-	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
-	if (rc) {
-		return 1; /* Default to 1 if no directory */
-	}
-
-	while (true) {
-		rc = fs_readdir(&dir, &ent);
-		if ((rc < 0) || (ent.name[0] == 0)) {
-			break;
-		}
-
-		if (get_log_file_metadata(&ent, &meta) == 0) {
-			if (meta.boot_num > max_boot_num) {
-				max_boot_num = meta.boot_num;
-			}
-			file_ctr++;
+	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
+		if (pn->bid > max_boot_num) {
+			max_boot_num = pn->bid;
 		}
 	}
-
-	(void)fs_closedir(&dir);
 
 	return max_boot_num + 1;
 }
@@ -440,7 +497,7 @@ static int allocate_new_file(struct fs_file_t *file)
 	int curr_file_num;
 
 #if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
-	int64_t uptime = k_uptime_get();
+	int64_t uptime;
 #else
 	struct fs_dirent ent;
 	off_t file_size;
@@ -450,7 +507,17 @@ static int allocate_new_file(struct fs_file_t *file)
 
 	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
 #if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+		if (!file_ctr) {
+			file_ctr = file_list_update();
+		}
+
+		while (file_ctr >= CONFIG_LOG_BACKEND_FS_FILES_LIMIT) {
+			del_oldest_log();
+		}
+
 		current_boot_number = determine_boot_number();
+		uptime = k_uptime_get();
+
 		/* Create first file for this boot */
 		snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
 			 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, current_boot_number, uptime);
@@ -459,7 +526,11 @@ static int allocate_new_file(struct fs_file_t *file)
 		if (rc < 0) {
 			goto out;
 		}
-		file_ctr++;
+
+		if (!file_list_add_item(current_boot_number, uptime)) {
+			file_ctr++;
+		}
+
 		backend_state = BACKEND_FS_OK;
 		last_rotation_time = uptime;
 		current_boot_start_uptime = uptime;
@@ -598,7 +669,9 @@ static int allocate_new_file(struct fs_file_t *file)
 			return -ENOSPC;
 		}
 	}
+
 #if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+	uptime = k_uptime_get();
 	snprintf(fname, sizeof(fname), "%s/%s%04u_%010lld", CONFIG_LOG_BACKEND_FS_DIR,
 		 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, current_boot_number, uptime);
 #else
@@ -610,7 +683,10 @@ static int allocate_new_file(struct fs_file_t *file)
 	if (rc < 0) {
 		goto out;
 	}
-	++file_ctr;
+	if (!file_list_add_item(current_boot_number, uptime)) {
+		file_ctr++;
+	}
+
 	last_rotation_time = uptime;
 	newest = curr_file_num;
 
@@ -639,51 +715,27 @@ static int del_log_by_num(int boot_num, int64_t uptime)
 
 static uint64_t get_logs_duration(void)
 {
-	struct fs_dir_t dir;
-	struct fs_dirent ent;
-	struct file_metadata meta;
 	uint64_t session_start_time = -1, session_end_time = -1;
 	uint64_t total_duration = 0;
 	int boot_num = -1;
-	int rc;
+	struct file_list_item *pn = NULL;
 
-	fs_dir_t_init(&dir);
-
-	rc = fs_opendir(&dir, CONFIG_LOG_BACKEND_FS_DIR);
-	if (rc) {
-		return -1;
-	}
-
-	/**
-	 * Calculate total duration of all logs
-	 */
-	while (true) {
-		rc = fs_readdir(&dir, &ent);
-		if (rc < 0 || ent.name[0] == 0) {
-			break;
-		}
-
-		if (get_log_file_metadata(&ent, &meta) == 0) {
-			if (boot_num == meta.boot_num &&
-					meta.uptime > session_end_time) {
-				session_end_time = meta.uptime;
-			} else {
-				if (boot_num != -1) {
-					total_duration += ((session_end_time -
-						session_start_time) +
-							NEW_FILE_INTERVAL_MS/2);
-				}
-				session_start_time = meta.uptime;
-				session_end_time = meta.uptime;
-				boot_num = meta.boot_num;
+	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
+		if (boot_num == pn->bid && pn->ts > session_end_time) {
+			session_end_time = pn->ts;
+		} else {
+			if (boot_num != -1) {
+				total_duration += ((session_end_time - session_start_time) +
+						   NEW_FILE_INTERVAL_MS / 2);
 			}
+			session_start_time = pn->ts;
+			session_end_time = pn->ts;
+			boot_num = pn->bid;
 		}
 	}
 
 	/* Add last boot as well*/
 	total_duration += (session_end_time - session_start_time);
-
-	(void)fs_closedir(&dir);
 
 	return total_duration;
 }
@@ -717,6 +769,25 @@ static int del_oldest_log(void)
 	struct file_metadata meta;
 	uint64_t min_ts = -1;
 	uint32_t min_bid = -1;
+	char fname[MAX_PATH_LEN];
+	struct file_list_item *item;
+
+	item = file_list_get_oldest_file();
+	if (item) {
+		sprintf(fname, "%s%s%04u_%010llu", CONFIG_LOG_BACKEND_FS_DIR,
+			CONFIG_LOG_BACKEND_FS_FILE_PREFIX, item->bid, item->ts);
+		rc = fs_unlink(fname);
+		if (rc) {
+			printf("%s: cannot unlink %s\n", __func__, fname);
+		} else {
+
+			sys_slist_find_and_remove(&file_list, &item->node);
+			k_free(item);
+			file_ctr--;
+		}
+	}
+
+	return !rc;
 
 	fs_dir_t_init(&dir);
 
@@ -735,8 +806,7 @@ static int del_oldest_log(void)
 			if (meta.boot_num < min_bid) {
 				min_bid = meta.boot_num;
 				min_ts = meta.uptime;
-			} else if (min_bid == meta.boot_num && meta.uptime <
-					min_ts) {
+			} else if (min_bid == meta.boot_num && meta.uptime < min_ts) {
 				min_ts = meta.uptime;
 			}
 		}
@@ -789,7 +859,7 @@ int log_backend_fs_clear_logs(bool activate)
 		}
 
 		snprintf(path, sizeof(CONFIG_LOG_BACKEND_FS_DIR) + MAX_PATH_LEN + 1, "%s/%s",
-				CONFIG_LOG_BACKEND_FS_DIR, dirent.name);
+			 CONFIG_LOG_BACKEND_FS_DIR, dirent.name);
 
 		(void)fs_unlink(path);
 	}
