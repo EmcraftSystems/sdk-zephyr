@@ -37,7 +37,12 @@ struct logfs_msg {
 #define MSG_SIZE 4
 
 sys_slist_t file_list = SYS_SLIST_STATIC_INIT(&file_list);
-struct k_mutex file_list_lock;
+
+struct file_list_item {
+	sys_snode_t node;
+	uint32_t bid;
+	uint64_t ts;
+};
 
 K_MSGQ_DEFINE(log_msgq, sizeof(struct logfs_msg), MSG_SIZE, 1);
 K_THREAD_STACK_DEFINE(logfs_queue_stack_area, CONFIG_LOG_BACKEND_FS_STACK_SIZE);
@@ -151,11 +156,7 @@ static int file_list_add_item(uint32_t boot_id, uint64_t timestamp)
 	item->bid = boot_id;
 	item->ts = timestamp;
 
-	k_mutex_lock(&file_list_lock, K_FOREVER);
-
 	sys_slist_append(&file_list, &item->node);
-
-	k_mutex_unlock(&file_list_lock);
 
 	return 0;
 }
@@ -196,34 +197,6 @@ static int file_list_update(void)
 	return cnt;
 }
 
-int log_backend_fs_flist_get_max_ts(struct sys_hashmap *map)
-{
-	struct file_list_item *pn;
-	struct file_list_item *cur = NULL;
-	uint64_t ts;
-
-	k_mutex_lock(&file_list_lock, K_FOREVER);
-
-	cur = SYS_SLIST_PEEK_HEAD_CONTAINER(&file_list, cur, node);
-	if (cur == NULL) {
-		k_mutex_unlock(&file_list_lock);
-		return -ENODATA;
-	}
-
-	sys_hashmap_clear(map, NULL, NULL);
-	sys_hashmap_insert(map, cur->bid, cur->ts, NULL);
-
-	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
-		if (!sys_hashmap_get(map, pn->bid, &ts) || pn->ts > ts) {
-			sys_hashmap_insert(map, pn->bid, pn->ts, NULL);
-		}
-	}
-
-	k_mutex_unlock(&file_list_lock);
-
-	return 0;
-}
-
 static struct file_list_item *file_list_get_oldest_file(void)
 {
 	struct file_list_item *pn;
@@ -241,34 +214,6 @@ static struct file_list_item *file_list_get_oldest_file(void)
 	}
 
 	return cur;
-}
-
-struct file_list_item *log_backend_fs_flist_get_next(struct file_list_item *item)
-{
-	struct file_list_item *pn, *next = item;
-
-	k_mutex_lock(&file_list_lock, K_FOREVER);
-
-	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
-		if (pn->bid >= item->bid) {
-			if ((next == item && (pn->bid > item->bid || pn->ts > item->ts)) ||
-			    (pn->bid < next->bid && pn->bid > item->bid) ||
-			    (pn->bid == next->bid && pn->bid > item->bid && pn->ts < next->ts) ||
-			    (pn->bid == item->bid && pn->bid < next->bid && pn->ts > item->ts) ||
-			    (pn->bid == item->bid && pn->bid == next->bid && pn->ts < next->ts &&
-			     pn->ts > item->ts)) {
-				next = pn;
-			}
-		}
-	}
-
-	k_mutex_unlock(&file_list_lock);
-
-	if (next == item) {
-		return NULL;
-	}
-
-	return next;
 }
 
 #if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
@@ -846,12 +791,6 @@ static void log_backend_fs_init(const struct log_backend *const backend)
 	k_work_queue_start(&logfs_queue_work_q, logfs_queue_stack_area,
 			   K_THREAD_STACK_SIZEOF(logfs_queue_stack_area), THREAD_PRIORITY, &cfg);
 	k_work_init(&logfs_msg_work, logfs_consumer);
-
-	rc = k_mutex_init(&file_list_lock);
-	if (rc != 0) {
-		printf("%s: mutex init failed, rc = %d\n", __func__, rc);
-		return;
-	}
 
 	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
 		if (check_log_volume_available()) {
