@@ -37,12 +37,7 @@ struct logfs_msg {
 #define MSG_SIZE 4
 
 sys_slist_t file_list = SYS_SLIST_STATIC_INIT(&file_list);
-
-struct file_list_item {
-	sys_snode_t node;
-	uint32_t bid;
-	uint64_t ts;
-};
+struct k_mutex file_list_lock;
 
 K_MSGQ_DEFINE(log_msgq, sizeof(struct logfs_msg), MSG_SIZE, 1);
 K_THREAD_STACK_DEFINE(logfs_queue_stack_area, CONFIG_LOG_BACKEND_FS_STACK_SIZE);
@@ -147,6 +142,8 @@ static int create_log_dir(const char *path)
 static int file_list_add_item(uint32_t boot_id, uint64_t timestamp)
 {
 	struct file_list_item *item = k_malloc(sizeof(struct file_list_item));
+	struct file_list_item *pn;
+	struct file_list_item *prev = NULL;
 
 	if (!item) {
 		printf("%s: malloc error\n", __func__);
@@ -156,7 +153,26 @@ static int file_list_add_item(uint32_t boot_id, uint64_t timestamp)
 	item->bid = boot_id;
 	item->ts = timestamp;
 
-	sys_slist_append(&file_list, &item->node);
+	k_mutex_lock(&file_list_lock, K_FOREVER);
+
+	/* the list is ordered by boot id and timestamp */
+	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
+		if (pn->bid < item->bid || (pn->bid == item->bid && pn->ts < item->ts)) {
+			prev = pn;
+		} else {
+			break;
+		}
+	}
+
+	if (!prev) {
+		/* no previous file found, append to the end of list */
+		sys_slist_append(&file_list, &item->node);
+	} else {
+		/* insert by order */
+		sys_slist_insert(&file_list, &prev->node, &item->node);
+	}
+
+	k_mutex_unlock(&file_list_lock);
 
 	return 0;
 }
@@ -197,23 +213,61 @@ static int file_list_update(void)
 	return cnt;
 }
 
-static struct file_list_item *file_list_get_oldest_file(void)
+int log_backend_fs_flist_get_max_ts(struct sys_hashmap *map)
 {
 	struct file_list_item *pn;
-	struct file_list_item *cur = NULL;
+	struct file_list_item *prev = NULL;
 
-	cur = SYS_SLIST_PEEK_HEAD_CONTAINER(&file_list, cur, node);
-	if (cur == NULL) {
-		return NULL;
+	sys_hashmap_clear(map, NULL, NULL);
+
+	k_mutex_lock(&file_list_lock, K_FOREVER);
+
+	if (sys_slist_is_empty(&file_list)) {
+		k_mutex_unlock(&file_list_lock);
+		return -ENODATA;
 	}
 
 	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
-		if ((pn->bid < cur->bid) || (pn->bid == cur->bid && pn->ts < cur->ts)) {
-			cur = pn;
+		if (prev && pn->bid > prev->bid) {
+			sys_hashmap_insert(map, prev->bid, prev->ts, NULL);
+		}
+		prev = pn;
+	}
+
+	/* last record is always highest timestamp */
+	sys_hashmap_insert(map, prev->bid, prev->ts, NULL);
+
+	k_mutex_unlock(&file_list_lock);
+
+	return 0;
+}
+
+static struct file_list_item *file_list_get_oldest_file(void)
+{
+	struct file_list_item *cur = NULL;
+
+	/* oldest file is always in the beginning of the list */
+	cur = SYS_SLIST_PEEK_HEAD_CONTAINER(&file_list, cur, node);
+
+	return cur;
+}
+
+struct file_list_item *log_backend_fs_flist_get_next(struct file_list_item *item)
+{
+	struct file_list_item *pn;
+
+	k_mutex_lock(&file_list_lock, K_FOREVER);
+
+	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
+		if (pn->bid > item->bid || (pn->bid == item->bid && pn->ts > item->ts)) {
+			k_mutex_unlock(&file_list_lock);
+			return pn;
 		}
 	}
 
-	return cur;
+	k_mutex_unlock(&file_list_lock);
+
+	return NULL;
 }
 
 #if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
@@ -415,10 +469,9 @@ static uint32_t determine_boot_number(void)
 	uint32_t max_boot_num = 0;
 	struct file_list_item *pn;
 
-	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
-		if (pn->bid > max_boot_num) {
-			max_boot_num = pn->bid;
-		}
+	pn = SYS_SLIST_PEEK_TAIL_CONTAINER(&file_list);
+	if (pn) {
+		max_boot_num = pn->bid;
 	}
 
 	return max_boot_num + 1;
@@ -791,6 +844,12 @@ static void log_backend_fs_init(const struct log_backend *const backend)
 	k_work_queue_start(&logfs_queue_work_q, logfs_queue_stack_area,
 			   K_THREAD_STACK_SIZEOF(logfs_queue_stack_area), THREAD_PRIORITY, &cfg);
 	k_work_init(&logfs_msg_work, logfs_consumer);
+
+	rc = k_mutex_init(&file_list_lock);
+	if (rc != 0) {
+		printf("%s: mutex init failed, rc = %d\n", __func__, rc);
+		return;
+	}
 
 	if (backend_state == BACKEND_FS_NOT_INITIALIZED) {
 		if (check_log_volume_available()) {
