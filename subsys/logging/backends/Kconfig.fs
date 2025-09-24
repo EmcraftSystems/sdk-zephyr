@@ -95,6 +95,13 @@ config LOG_BACKEND_FS_MAX_FILE_TIME
 	  Time interval during which a single log file is used for writing. Upon
 	  interval expiration the log backend switches to a new file.
 
+config LOG_BACKEND_FS_QUIRK_EXPOSE_DIR_CACHE_API
+	bool "Expose directory cache API for applications"
+	default y
+	help
+	  This is a no-op configuration option so the application
+	  would not use new API if it is built with old SDK.
+
 endif # LOG_BACKEND_FS_TIME_BASED_ROTATION
 
 endif # LOG_BACKEND_FS
