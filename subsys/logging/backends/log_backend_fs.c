@@ -469,7 +469,7 @@ static uint32_t determine_boot_number(void)
 	uint32_t max_boot_num = 0;
 	struct file_list_item *pn;
 
-	pn = SYS_SLIST_PEEK_TAIL_CONTAINER(&file_list);
+	pn = SYS_SLIST_PEEK_TAIL_CONTAINER(&file_list, pn, node);
 	if (pn) {
 		max_boot_num = pn->bid;
 	}
