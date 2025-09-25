@@ -362,7 +362,7 @@ static int bq27427_ccgain_quirk(const struct device *dev, bool canwrite, bool *c
 	return 0;
 }
 
-static int bq274xx_ensure_chemistry(const struct device *dev)
+static int bq274xx_ensure_chemistry(const struct device *dev, bool can_write, bool *changed)
 {
 	struct bq274xx_data *data = dev->data;
 	const struct bq274xx_config *const config = dev->config;
@@ -391,6 +391,10 @@ static int bq274xx_ensure_chemistry(const struct device *dev)
 			LOG_ERR("Unable to confirm chemistry ID 0x%04x. Device reported 0x%04x",
 				chem_id, val);
 			return -EIO;
+		}
+		*changed = true;
+		if (!can_write) {
+			return 0;
 		}
 
 		uint16_t cmd;
@@ -458,6 +462,7 @@ static int bq274xx_gauge_configure(const struct device *dev)
 	bool block_82_modified = false;
 	bool block_81_modified = false;
 	bool quirk_modified = false;
+	bool chem_updated = false;
 
 	designenergy_mwh = (uint32_t)config->design_capacity * 37 / 10; /* x3.7 */
 	taperrate = config->design_capacity * 10 / config->taper_current;
@@ -527,6 +532,11 @@ static int bq274xx_gauge_configure(const struct device *dev)
 				     &block_81_modified);
 	}
 
+	ret = bq274xx_ensure_chemistry(dev, false, &chem_updated);
+	if (ret < 0) {
+		return ret;
+	}
+
 	ret = bq274xx_read_block(dev, BQ274XX_SUBCLASS_82, 0, block_82, sizeof(block_82));
 	if (ret < 0) {
 		return ret;
@@ -540,7 +550,7 @@ static int bq274xx_gauge_configure(const struct device *dev)
 			     &block_82_modified);
 	bq274xx_update_block(block_82, regs->dm_taper_rate, taperrate, &block_82_modified);
 
-	if (block_82_modified || block_81_modified || quirk_modified) {
+	if (block_82_modified || block_81_modified || quirk_modified || chem_updated) {
 		ret = bq274xx_mode_cfgupdate(dev, true);
 		if (ret < 0) {
 			/* We observed a failure to enter the CONFIG UPDATE mode
@@ -563,6 +573,11 @@ static int bq274xx_gauge_configure(const struct device *dev)
 			if (ret < 0) {
 				return ret;
 			}
+		}
+
+		ret = bq274xx_ensure_chemistry(dev, true, &chem_updated);
+		if (ret < 0) {
+			return ret;
 		}
 
 		if (block_82_modified) {
@@ -616,12 +631,6 @@ static int bq274xx_gauge_configure(const struct device *dev)
 			}
 		}
 	}
-
-	ret = bq274xx_ensure_chemistry(dev);
-	if (ret < 0) {
-		return ret;
-	}
-
 
 	ret = bq274xx_ctrl_reg_write(dev, BQ274XX_CTRL_SEALED);
 	if (ret < 0) {
