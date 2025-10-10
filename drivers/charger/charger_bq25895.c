@@ -84,6 +84,11 @@ LOG_MODULE_REGISTER(bq25895, CONFIG_CHARGER_LOG_LEVEL);
 #define BQ25895_CTL_PN_MSK     (7 << 3)
 #define BQ25895_CTL_PN_BQ25895 (7 << 3)
 
+/* BATFET register bits */
+#define BQ25895_BATFET_DIS     (1 << 7)
+#define BQ25895_BATFET_DLY     (1 << 6)
+#define BQ25895_BATFET_RST_EN  (1 << 5)
+
 struct bq25895_config {
 	struct i2c_dt_spec i2c;
 	struct gpio_dt_spec ce_gpio;
@@ -364,6 +369,8 @@ static int bq25895_get_prop(const struct device *dev, charger_prop_t prop,
 		return bq25895_get_type(dev, &val->charge_type);
 	case CHARGER_PROP_HEALTH:
 		return bq25895_get_health(dev, &val->health);
+	case CHARGER_PROP_CUSTOM_BEGIN:
+		return bq25895_get_shipping_mode(dev, &val->shipping_mode);
 	default:
 		return -ENOTSUP;
 	}
@@ -387,9 +394,68 @@ static int bq25895_set_prop(const struct device *dev, charger_prop_t prop,
 		data->charger_online_notifier = val->online_notification;
 		return 0;
 
+	case CHARGER_PROP_CUSTOM_BEGIN:
+		if (val->shipping_mode) {
+			return bq25895_enter_shipping_mode(dev);
+		} else {
+			return bq25895_exit_shipping_mode(dev);
+		}
+
 	default:
 		return -ENOTSUP;
 	}
+}
+
+static int bq25895_enter_shipping_mode(const struct device *dev)
+{
+	const struct bq25895_config *cfg = dev->config;
+	int ret;
+
+	LOG_INF("Entering shipping mode");
+
+	/* Disable BATFET to enter shipping mode */
+	ret = i2c_reg_update_byte_dt(&cfg->i2c, BQ25895_BATFET, BQ25895_BATFET_DIS,
+				     BQ25895_BATFET_DIS);
+	if (ret < 0) {
+		LOG_ERR("Failed to enter shipping mode: %d", ret);
+		return ret;
+	}
+
+	LOG_INF("Successfully entered shipping mode");
+	return 0;
+}
+
+static int bq25895_exit_shipping_mode(const struct device *dev)
+{
+	const struct bq25895_config *cfg = dev->config;
+	int ret;
+
+	LOG_INF("Exiting shipping mode");
+
+	/* Enable BATFET to exit shipping mode */
+	ret = i2c_reg_update_byte_dt(&cfg->i2c, BQ25895_BATFET, BQ25895_BATFET_DIS, 0);
+	if (ret < 0) {
+		LOG_ERR("Failed to exit shipping mode: %d", ret);
+		return ret;
+	}
+
+	LOG_INF("Successfully exited shipping mode");
+	return 0;
+}
+
+static int bq25895_get_shipping_mode(const struct device *dev, bool *shipping_mode)
+{
+	const struct bq25895_config *cfg = dev->config;
+	uint8_t val;
+	int ret;
+
+	ret = i2c_reg_read_byte_dt(&cfg->i2c, BQ25895_BATFET, &val);
+	if (ret < 0) {
+		return ret;
+	}
+
+	*shipping_mode = (val & BQ25895_BATFET_DIS) != 0;
+	return 0;
 }
 
 static const struct charger_driver_api bq25895_api = {
