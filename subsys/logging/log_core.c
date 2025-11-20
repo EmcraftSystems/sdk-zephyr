@@ -425,6 +425,8 @@ void z_impl_log_panic(void)
 		return;
 	}
 
+	panic_mode = true;
+
 	/* If panic happened early logger might not be initialized.
 	 * Forcing initialization of the logger and auto-starting backends.
 	 */
@@ -433,7 +435,7 @@ void z_impl_log_panic(void)
 	if (IS_ENABLED(CONFIG_LOG_FRONTEND)) {
 		log_frontend_panic();
 		if (IS_ENABLED(CONFIG_LOG_FRONTEND_ONLY)) {
-			goto out;
+			return;
 		}
 	}
 
@@ -448,9 +450,6 @@ void z_impl_log_panic(void)
 		while (log_process() == true) {
 		}
 	}
-
-out:
-	panic_mode = true;
 }
 
 #ifdef CONFIG_USERSPACE
@@ -726,7 +725,7 @@ union log_msg_generic *z_log_msg_claim_oldest(k_timeout_t *backoff)
 	}
 
 	if (msg) {
-		if (CONFIG_LOG_PROCESSING_LATENCY_US > 0) {
+		if (!panic_mode && CONFIG_LOG_PROCESSING_LATENCY_US > 0) {
 			int32_t diff = t_min - (timestamp_func() - proc_latency);
 
 			if (diff > 0) {
