@@ -252,22 +252,62 @@ static struct file_list_item *file_list_get_oldest_file(void)
 	return cur;
 }
 
-struct file_list_item *log_backend_fs_flist_get_next(struct file_list_item *item)
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+static int file_list_remove_file(struct file_list_item *item)
+{
+	char fname[MAX_PATH_LEN];
+	int rc;
+
+	snprintf(fname, sizeof(fname), "%s%s%04u_%010llu", CONFIG_LOG_BACKEND_FS_DIR,
+		 CONFIG_LOG_BACKEND_FS_FILE_PREFIX, item->bid, item->ts);
+
+	rc = fs_unlink(fname);
+	if (rc) {
+		printf("%s: cannot unlink %s (rc = %d)\n", __func__, fname, rc);
+	} else {
+		sys_slist_find_and_remove(&file_list, &item->node);
+		k_free(item);
+		file_ctr--;
+	}
+
+	return rc;
+}
+#endif
+
+struct file_list_item *log_backend_fs_flist_get_next(struct file_list_item *item, bool cleanup)
 {
 	struct file_list_item *pn;
+	struct file_list_item *next_item = NULL;
 
 	k_mutex_lock(&file_list_lock, K_FOREVER);
 
 	SYS_SLIST_FOR_EACH_CONTAINER(&file_list, pn, node) {
 		if (pn->bid > item->bid || (pn->bid == item->bid && pn->ts > item->ts)) {
-			k_mutex_unlock(&file_list_lock);
-			return pn;
+			next_item = pn;
+			break;
 		}
 	}
 
+#if defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
+	if (next_item != NULL && cleanup) {
+		/* We found the next file and the application
+		 * requested a cleanup of the previous ones.
+		 * Remove them all to speed up the file system.
+		 */
+		struct file_list_item *pns;
+
+		SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&file_list, pn, pns, node) {
+			if (next_item == pn) {
+				break;
+			}
+			file_list_remove_file(pn);
+		}
+	}
+#endif
+
 	k_mutex_unlock(&file_list_lock);
 
-	return NULL;
+	return next_item;
 }
 
 #if !defined(CONFIG_LOG_BACKEND_FS_TIME_BASED_ROTATION)
@@ -751,22 +791,11 @@ static int del_oldest_log(void)
 		}
 	}
 #else
-	char fname[MAX_PATH_LEN];
 	struct file_list_item *item;
 
 	item = file_list_get_oldest_file();
 	if (item) {
-		sprintf(fname, "%s%s%04u_%010llu", CONFIG_LOG_BACKEND_FS_DIR,
-			CONFIG_LOG_BACKEND_FS_FILE_PREFIX, item->bid, item->ts);
-		rc = fs_unlink(fname);
-
-		if (rc) {
-			printf("%s: cannot unlink %s (rc = %d)\n", __func__, fname, rc);
-		} else {
-			sys_slist_find_and_remove(&file_list, &item->node);
-			k_free(item);
-			file_ctr--;
-		}
+		rc = file_list_remove_file(item);
 	}
 #endif
 	return rc;
