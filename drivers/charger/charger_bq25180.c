@@ -45,6 +45,7 @@ LOG_MODULE_REGISTER(bq25180, CONFIG_CHARGER_LOG_LEVEL);
 #define BQ25180_WATCHDOG_DISABLE 0x03
 #define BQ25180_DEVICE_ID_MSK GENMASK(3, 0)
 #define BQ25180_DEVICE_ID 0x00
+#define BQ25188_DEVICE_ID 0x04
 #define BQ25180_SHIP_RST_EN_RST_SHIP_MSK GENMASK(6, 5)
 #define BQ25180_SHIP_RST_EN_RST_SHIP_ADAPTER 0x20
 #define BQ25180_SHIP_RST_EN_RST_SHIP_BUTTON 0x40
@@ -205,6 +206,7 @@ static int bq25180_get_charge_voltage(const struct device *dev, uint32_t *const_
 	if (ret < 0) {
 		return ret;
 	}
+	val &= BQ25180_VBAT_MSK;
 
 	*const_charge_voltage_uv = bq25180_vbatreg_to_mv(val) * 1000;
 
@@ -324,7 +326,7 @@ static int bq25180_init(const struct device *dev)
 	}
 
 	val &= BQ25180_DEVICE_ID_MSK;
-	if (val != BQ25180_DEVICE_ID) {
+	if ((val != BQ25180_DEVICE_ID) && (val != BQ25188_DEVICE_ID)) {
 		LOG_ERR("Invalid device id: %02x", val);
 		return -EINVAL;
 	}
