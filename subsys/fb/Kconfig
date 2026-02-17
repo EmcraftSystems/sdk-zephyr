@@ -31,6 +31,12 @@ config CHARACTER_FRAMEBUFFER_SHELL_DRIVER_NAME
 	help
 	  Character Framebuffer Display Driver Name
 
+config CBF_PARTIAL_UPDATES
+	bool "Character Framebuffer Partial Update Support"
+	default n
+	help
+	  Set if hardware supports windowed display updates
+
 module = CFB
 module-str = cfb
 source "subsys/logging/Kconfig.template.log_config"

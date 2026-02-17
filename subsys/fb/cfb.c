@@ -19,10 +19,13 @@ STRUCT_SECTION_END_EXTERN(cfb_font);
 #define LSB_BIT_MASK(x) BIT_MASK(x)
 #define MSB_BIT_MASK(x) (BIT_MASK(x) << (8 - x))
 
+#ifndef CONFIG_CBF_PARTIAL_UPDATES
 #define DISP_NUM_PARTS (4)
+#endif
 #define DISP_BUF_SIZE  (960 * 640 / 8)
 
 static uint8_t fb_buf[DISP_BUF_SIZE];
+static int upd_win_x = -1, upd_win_y = -1, upd_win_ex = -1, upd_win_ey = -1;
 
 static inline uint8_t byte_reverse(uint8_t b)
 {
@@ -458,6 +461,26 @@ int cfb_framebuffer_invert(const struct device *dev)
 	return 0;
 }
 
+int cfb_framebuffer_set_updated_window(const struct device *dev, int x, int y, int ex, int ey)
+{
+	const struct display_driver_api *api = dev->api;
+	struct display_capabilities cfg;
+
+	api->get_capabilities(dev, &cfg);
+
+	if (x < 0 || x > cfg.x_resolution || x > ex || ex > cfg.x_resolution || y < 0 ||
+	    y > cfg.y_resolution || y > ey || ey > cfg.y_resolution) {
+		return -1;
+	}
+
+	upd_win_x = (x < upd_win_x || upd_win_x < 0) ? (x & ~7) : upd_win_x;
+	upd_win_ex = ex > upd_win_ex ? ((ex + 7) & ~7) : upd_win_ex;
+	upd_win_y = (y < upd_win_y || upd_win_y < 0) ? (y & ~7) : upd_win_y;
+	upd_win_ey = ey > upd_win_ey ? ((ey + 7) & ~7) : upd_win_ey;
+
+	return 0;
+}
+
 int cfb_framebuffer_finalize(const struct device *dev)
 {
 	const struct display_driver_api *api = dev->api;
@@ -470,10 +493,18 @@ int cfb_framebuffer_finalize(const struct device *dev)
 		return -ENODEV;
 	}
 
+#ifndef CONFIG_CBF_PARTIAL_UPDATES
 	desc.buf_size = fb->size / DISP_NUM_PARTS;
 	desc.width = fb->x_res;
 	desc.height = fb->y_res / DISP_NUM_PARTS;
 	desc.pitch = fb->x_res;
+#else
+	/* partial updates are implemented for full lines of frame buffer */
+	desc.width = fb->x_res;
+	desc.height = (upd_win_y < 0 || upd_win_ey < 0) ? fb->y_res : upd_win_ey - upd_win_y;
+	desc.pitch = fb->x_res;
+	desc.buf_size = desc.width * desc.height / fb->ppt;
+#endif
 
 	if (invert) {
 		cfb_invert(fb);
@@ -481,15 +512,24 @@ int cfb_framebuffer_finalize(const struct device *dev)
 
 	api->blanking_on(dev);
 
+#ifndef CONFIG_CBF_PARTIAL_UPDATES
 	for (int i = 0; i < fb->y_res; i += fb->y_res / DISP_NUM_PARTS) {
 		err = api->write(dev, 0, i, &desc, &fb->buf[i * (fb->x_res / 8U)]);
 	}
+#else
+	err = api->write(dev, 0, upd_win_y, &desc, &fb->buf[upd_win_y * (fb->x_res / 8U)]);
+#endif
 
 	api->blanking_off(dev);
 
 	if (invert) {
 		cfb_invert(fb);
 	}
+
+	upd_win_x = -1;
+	upd_win_ex = -1;
+	upd_win_y = -1;
+	upd_win_ey = -1;
 
 	return err;
 }
